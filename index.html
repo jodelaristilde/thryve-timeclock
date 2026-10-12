@@ -63,6 +63,18 @@
   .emp:last-child { border-bottom: 0; }
   .emp .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   button.small { padding: 6px 12px; font-size: 13px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; color: var(--ink); font-weight: 600; font-size: 14px; }
+  .switch input { appearance: none; -webkit-appearance: none; width: 44px; height: 26px; padding: 0; border-radius: 99px; border: 0;
+    background: #c9ccc3; position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; }
+  .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .15s; }
+  .switch input:checked { background: var(--mint-ink); }
+  .switch input:checked::after { left: 21px; }
+  .switch input:disabled { opacity: .55; cursor: default; }
+  .switch span { min-width: 58px; }
+  .check { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--ink); font-size: 15px; cursor: pointer; }
+  .check input { width: 18px; height: 18px; padding: 0; }
+  @media (prefers-reduced-motion: reduce) { .switch input, .switch input::after { transition: none; } }
   button.danger { background: var(--bad); color: #ffffff; }
   @media (max-width: 560px) { header img { width: 56px; height: 56px; } h1 { font-size: 20px; } }
 </style>
@@ -108,13 +120,30 @@
     <div id="tabEmployees" class="hidden">
       <div class="panel">
         <h2>Register an employee</h2>
-        <p class="muted" style="margin-top:0">Names you add here appear in the <b>Your Name</b> list on the clock-in form right away.</p>
+        <p class="muted" style="margin-top:0">Only employees switched to <b>Working</b> appear in the <b>Your Name</b> list on the clock-in form, so only they can clock in.
+          Switch someone on when you ask them to work, and off when their shift is over.</p>
         <form id="addEmpForm" class="row" autocomplete="off">
           <div class="grow"><label for="empName">Employee full name</label><input id="empName" placeholder="e.g. Jane Smith" maxlength="60"></div>
+          <label class="check" for="empWorkNow"><input type="checkbox" id="empWorkNow"> Can clock in now</label>
           <button type="submit" id="addEmpBtn">Add employee</button>
         </form>
         <div id="empMsg"></div>
       </div>
+      <div class="panel">
+        <h2>Schedule a shift</h2>
+        <p class="muted" style="margin-top:0">Employees are paid only for time inside their scheduled shift. Clocking in early, late, or on a day with no shift is flagged on the weekly report.</p>
+        <form id="schedForm" class="row" autocomplete="off">
+          <div class="grow"><label for="schedName">Employee</label><select id="schedName"></select></div>
+          <div style="flex:0 1 170px"><label for="schedDate">Date</label><input id="schedDate" type="date"></div>
+          <div style="flex:0 1 140px"><label for="schedStart">Start</label><input id="schedStart" type="time" value="09:00" step="300"></div>
+          <div style="flex:0 1 140px"><label for="schedEnd">End</label><input id="schedEnd" type="time" value="17:00" step="300"></div>
+          <button type="submit" id="schedBtn">Add shift</button>
+        </form>
+        <div id="schedMsg"></div>
+        <h2 style="margin-top:20px">Upcoming shifts</h2>
+        <div id="schedList"><p class="muted">Loading schedule…</p></div>
+      </div>
+
       <div class="panel">
         <h2>Registered employees <span class="muted" id="empCount" style="font-weight:600"></span></h2>
         <div id="empList"><p class="muted">Loading names from your form…</p></div>
@@ -140,6 +169,7 @@
       <div class="row" style="margin-top:16px">
         <div style="flex:0 1 260px"><label for="empFilter">Show report for</label>
           <select id="empFilter"><option value="">All employees</option></select></div>
+        <label class="check" for="payRule" style="margin:0 0 10px"><input type="checkbox" id="payRule" checked> Pay scheduled time only</label>
         <button id="refreshBtn" class="ghost">Refresh</button>
         <button id="pdfBtn">Download week as PDF</button>
         <button id="csvBtn" class="ghost">Download week as CSV</button>
@@ -157,6 +187,22 @@
     <div class="panel">
       <h2>Shift details</h2>
       <div class="tablewrap"><table id="detail"></table></div>
+    </div>
+
+    <div class="panel">
+      <h2>Start fresh</h2>
+      <p class="muted" style="margin-top:0">Delete every clock-in and clock-out punch, for example after testing. Your employees, shifts, form link and printed QR codes stay the same.
+        This can't be undone, so download a PDF or CSV first if you need a record.</p>
+      <div id="resetStep1"><button class="ghost" id="resetBtn">Delete all punches…</button></div>
+      <div id="resetStep2" class="hidden">
+        <p style="margin:0 0 8px"><b>Delete all <span id="resetCount">0</span> punches?</b> Type <b>DELETE</b> to confirm.</p>
+        <div class="row">
+          <div style="flex:0 1 200px"><label for="resetConfirm">Confirmation</label><input id="resetConfirm" autocomplete="off" placeholder="DELETE"></div>
+          <button class="danger" id="resetGo" disabled>Delete all punches</button>
+          <button class="ghost" id="resetCancel">Cancel</button>
+        </div>
+      </div>
+      <div id="resetMsg"></div>
     </div>
     </div>
   </section>
@@ -238,6 +284,57 @@ function buildShifts(list) {
 }
 function shiftMs(s) { return s.in && s.out ? s.out - s.in : 0; }
 
+/* ---------- schedule + pay rules ---------- */
+function same(a, b) { return a.toLowerCase() === b.toLowerCase(); }
+function has(list, n) { return list.some(x => same(x, n)); }
+let schedules = [];          // {name, date:"YYYY-MM-DD", start:"HH:MM", end:"HH:MM", from:Date, to:Date}
+const GRACE = 5 * 60e3;      // 5 minutes either side before a punch is flagged
+function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function mkSched(name, date, start, end) {
+  const [y, m, d] = date.split("-").map(Number), [sh, sm] = start.split(":").map(Number), [eh, em] = end.split(":").map(Number);
+  const from = new Date(y, m - 1, d, sh, sm), to = new Date(y, m - 1, d, eh, em);
+  if (to <= from) to.setDate(to.getDate() + 1);          // overnight shift
+  return { name, date, start, end, from, to };
+}
+function parseSched(opt) {
+  const p = opt.split("~").map(x => x.trim());
+  if (p.length !== 4 || !/^\d{4}-\d{2}-\d{2}$/.test(p[1]) || !/^\d{2}:\d{2}$/.test(p[2]) || !/^\d{2}:\d{2}$/.test(p[3])) return null;
+  return mkSched(p[0], p[1], p[2], p[3]);
+}
+const schedToOpt = x => `${x.name} ~ ${x.date} ~ ${x.start} ~ ${x.end}`;
+function fmtClock(hhmm) { const [h, m] = hhmm.split(":").map(Number); return fmtTime(new Date(2000, 0, 1, h, m)); }
+function schedLabel(x) { return `${fmtClock(x.start)} – ${fmtClock(x.end)}`; }
+function payScheduledOnly() { const b = $("payRule"); return b ? b.checked !== false : true; }
+
+function annotate(s) {
+  if (s._a) return s._a;
+  const t0 = s.in || s.out, t1 = s.out || s.in;
+  const mine = schedules.filter(x => same(x.name, s.name));
+  const sched = mine.find(x => s.in && x.from < (s.out || new Date()) && x.to > s.in)
+             || mine.find(x => x.date === ymd(t0)) || null;
+  const notes = [];
+  if (!sched) notes.push("Not scheduled");
+  else {
+    if (s.in && s.in < sched.from - GRACE) notes.push(`In early (${hm(sched.from - s.in)})`);
+    if (s.in && s.in > +sched.from + GRACE) notes.push(`Late (${hm(s.in - sched.from)})`);
+    if (s.out && s.out < sched.to - GRACE) notes.push(`Left early (${hm(sched.to - s.out)})`);
+    if (s.out && s.out > +sched.to + GRACE) notes.push(`Stayed late (${hm(s.out - sched.to)})`);
+  }
+  let paid = shiftMs(s);
+  if (payScheduledOnly() && s.in && s.out) {
+    paid = sched ? Math.max(0, Math.min(s.out, sched.to) - Math.max(s.in, sched.from)) : 0;
+  }
+  return (s._a = { sched, notes, paid });
+}
+function paidMs(s) { return annotate(s).paid; }
+function statusText(s) {
+  const parts = [];
+  if (s.issue === "open") parts.push("On the clock"); else if (s.issue) parts.push(s.issue);
+  parts.push(...annotate(s).notes);
+  return parts.join(" · ") || "OK";
+}
+function needsReview(s) { return (s.issue && s.issue !== "open") || annotate(s).notes.length > 0; }
+
 /* ---------- render ---------- */
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
@@ -268,14 +365,15 @@ function render() {
     const k = s.name.toLowerCase();
     if (!people.has(k)) people.set(k, { name: s.name, days: Array(7).fill(0), total: 0, n: 0, open: false, issues: 0 });
     const r = people.get(k), t = s.in || s.out, di = (t.getDay() + 6) % 7;
-    r.days[di] += shiftMs(s); r.total += shiftMs(s);
+    r.days[di] += paidMs(s); r.total += paidMs(s);
     if (s.in && s.out) r.n++;
-    if (s.issue === "open") r.open = true; else if (s.issue) r.issues++;
+    if (s.issue === "open") r.open = true;
+    if (needsReview(s)) r.issues++;
   });
   const rows = [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
   const dayTotals = Array(7).fill(0); rows.forEach(r => r.days.forEach((v, i) => dayTotals[i] += v));
   const grand = rows.reduce((a, r) => a + r.total, 0);
-  const issues = shifts.filter(s => s.issue && s.issue !== "open").length;
+  const issues = shifts.filter(needsReview).length;
 
   $("sTotal").textContent = hm(grand);
   $("sPeople").textContent = rows.length;
@@ -290,21 +388,29 @@ function render() {
     : `<tr><td class="muted">No punches this week.</td></tr>`;
 
   const sorted = shifts.sort((a, b) => a.name.localeCompare(b.name) || ((a.in || a.out) - (b.in || b.out)));
-  $("detail").innerHTML = sorted.length ? `<tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th class="n">Hours</th><th>Status</th></tr>` + sorted.map(s =>
-    `<tr><td>${esc(s.name)}</td><td>${s.in ? fmtDT(s.in) : '<span class="muted">—</span>'}</td>
+  $("detail").innerHTML = sorted.length ? `<tr><th>Employee</th><th>Scheduled</th><th>Clock in</th><th>Clock out</th><th class="n">Punched</th><th class="n">Paid</th><th>Status</th></tr>` + sorted.map(s => {
+    const a = annotate(s);
+    const pills = [];
+    if (s.issue === "open") pills.push('<span class="pill on">on the clock</span>');
+    else if (s.issue) pills.push(`<span class="pill ${s.in && s.out ? "warn" : "bad"}">${esc(s.issue)}</span>`);
+    a.notes.forEach(n => pills.push(`<span class="pill ${n === "Not scheduled" ? "bad" : "warn"}">${esc(n)}</span>`));
+    return `<tr><td>${esc(s.name)}</td><td>${a.sched ? esc(schedLabel(a.sched)) : '<span class="muted">—</span>'}</td>
+     <td>${s.in ? fmtDT(s.in) : '<span class="muted">—</span>'}</td>
      <td>${s.out ? fmtDT(s.out) : '<span class="muted">—</span>'}</td><td class="n">${shiftMs(s) ? hm(shiftMs(s)) : "—"}</td>
-     <td>${s.issue === "open" ? '<span class="pill on">on the clock</span>' : s.issue ? `<span class="pill ${s.in && s.out ? "warn" : "bad"}">${esc(s.issue)}</span>` : '<span class="muted">OK</span>'}</td></tr>`).join("")
+     <td class="n total">${s.in && s.out ? hm(a.paid) : "—"}</td>
+     <td style="white-space:normal">${pills.join(" ") || '<span class="muted">OK</span>'}</td></tr>`; }).join("")
     : `<tr><td class="muted">No shifts this week.</td></tr>`;
 }
 
 /* ---------- CSV ---------- */
 function downloadCSV() {
   const q = v => `"${String(v).replace(/"/g, '""')}"`;
-  const lines = [["Employee", "Date", "Clock In", "Clock Out", "Hours (decimal)", "Hours (h:mm)", "Status"].map(q).join(",")];
+  const lines = [["Employee", "Date", "Scheduled", "Clock In", "Clock Out", "Punched (h:mm)", "Paid hours (decimal)", "Paid (h:mm)", "Status"].map(q).join(",")];
   weekShifts().sort((a, b) => a.name.localeCompare(b.name) || ((a.in || a.out) - (b.in || b.out))).forEach(s => {
     const t = s.in || s.out;
-    lines.push([s.name, t.toLocaleDateString("en-US"), s.in ? fmtTime(s.in) : "", s.out ? fmtTime(s.out) : "",
-      (shiftMs(s) / 3600e3).toFixed(2), shiftMs(s) ? hm(shiftMs(s)) : "", s.issue === "open" ? "On the clock" : (s.issue || "OK")].map(q).join(","));
+    const a = annotate(s);
+    lines.push([s.name, t.toLocaleDateString("en-US"), a.sched ? schedLabel(a.sched) : "", s.in ? fmtTime(s.in) : "", s.out ? fmtTime(s.out) : "",
+      shiftMs(s) ? hm(shiftMs(s)) : "", (a.paid / 3600e3).toFixed(2), a.paid ? hm(a.paid) : "", statusText(s)].map(q).join(","));
   });
   const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
   const a = document.createElement("a");
@@ -320,8 +426,9 @@ function weekSummaryRows() {
     const k = s.name.toLowerCase();
     if (!people.has(k)) people.set(k, { name: s.name, days: Array(7).fill(0), total: 0, open: false, issues: 0 });
     const r = people.get(k), t = s.in || s.out, di = (t.getDay() + 6) % 7;
-    r.days[di] += shiftMs(s); r.total += shiftMs(s);
-    if (s.issue === "open") r.open = true; else if (s.issue) r.issues++;
+    r.days[di] += paidMs(s); r.total += paidMs(s);
+    if (s.issue === "open") r.open = true;
+    if (needsReview(s)) r.issues++;
   });
   return { shifts, rows: [...people.values()].sort((a, b) => a.name.localeCompare(b.name)) };
 }
@@ -347,10 +454,10 @@ function downloadPDF() {
   doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.setTextColor(80);
   doc.text(`${filterName() ? "Weekly Hours for " + filterName() : "Weekly Hours Report"}  ·  ${range}`, M, 64);
   doc.setFontSize(9);
-  doc.text(`Generated ${new Date().toLocaleString("en-US")}  ·  Hours shown as h:mm`, W - M, 64, { align: "right" });
+  doc.text(`Generated ${new Date().toLocaleString("en-US")}  ·  Hours shown as h:mm  ·  ${payScheduledOnly() ? "Paid: scheduled time only" : "Paid: actual punched time"}`, W - M, 64, { align: "right" });
 
   doc.setFontSize(11); doc.setTextColor(...ink);
-  doc.text(`Total hours: ${hm(grand)}     Employees: ${rows.length}     Shifts: ${shifts.filter(s => s.in && s.out).length}     Punches to review: ${shifts.filter(s => s.issue && s.issue !== "open").length}`, M, 88);
+  doc.text(`Paid hours: ${hm(grand)}     Employees: ${rows.length}     Shifts: ${shifts.filter(s => s.in && s.out).length}     Punches to review: ${shifts.filter(needsReview).length}`, M, 88);
 
   const days = DAYS.map((d, i) => `${d}\n${fmtDay(addDays(weekStart, i))}`);
   doc.autoTable({
@@ -376,13 +483,14 @@ function downloadPDF() {
   doc.text("Shift details", M, y);
   doc.autoTable({
     startY: y + 8, margin: { left: M, right: M },
-    head: [["Employee", "Clock in", "Clock out", "Hours", "Status"]],
-    body: detail.length ? detail.map(s => [s.name, s.in ? fmtDT(s.in) : "—", s.out ? fmtDT(s.out) : "—",
-      shiftMs(s) ? hm(shiftMs(s)) : "—", s.issue === "open" ? "On the clock" : (s.issue || "OK")]) : [["No shifts this week", "", "", "", ""]],
+    head: [["Employee", "Scheduled", "Clock in", "Clock out", "Punched", "Paid", "Status"]],
+    body: detail.length ? detail.map(s => { const a = annotate(s); return [s.name, a.sched ? schedLabel(a.sched) : "—",
+      s.in ? fmtDT(s.in) : "—", s.out ? fmtDT(s.out) : "—", shiftMs(s) ? hm(shiftMs(s)) : "—",
+      s.in && s.out ? hm(a.paid) : "—", statusText(s)]; }) : [["No shifts this week", "", "", "", "", "", ""]],
     styles: { fontSize: 9.5, cellPadding: 5, lineColor: [210, 212, 205], lineWidth: 0.75, textColor: ink },
     headStyles: { fillColor: ink, textColor: [255, 255, 255] },
-    columnStyles: { 3: { halign: "right" } },
-    didParseCell: d => { if (d.section === "body" && d.column.index === 4 && d.cell.raw !== "OK") d.cell.styles.textColor = [161, 92, 0]; }
+    columnStyles: { 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { cellWidth: 170 } },
+    didParseCell: d => { if (d.section === "body" && d.column.index === 6 && d.cell.raw !== "OK") d.cell.styles.textColor = [161, 92, 0]; }
   });
 
   const pages = doc.getNumberOfPages();
@@ -419,8 +527,10 @@ async function connect() {
   $("connectBtn").disabled = true; showMsg("Loading punches from Jotform…", "ok");
   try {
     const subs = await fetchAll(base, key, formId);
+    submissionIds = subs.filter(x => !x.status || x.status === "ACTIVE").map(x => x.id);
     punches = subs.map(toPunch).filter(Boolean);
-    demoMode = false; nameQ = null;
+    demoMode = false; nameQ = null; rosterQ = null; schedQ = null; schedules = [];
+    try { await loadQuestions(); } catch (e) { /* report still works without schedules */ }
     store("thryve_key", key); store("thryve_form", formId); store("thryve_region", base);
     source = `Live from Jotform · ${punches.length} punches · updated ${fmtTime(new Date())}`;
     showReport();
@@ -428,6 +538,36 @@ async function connect() {
     showMsg(`Couldn't load punches: ${e.message}. Check the API key, form ID and account region, then try again.`, "err");
   } finally { $("connectBtn").disabled = false; }
 }
+/* ---------- start fresh: delete all punches ---------- */
+let submissionIds = [];
+function resetMsg(t, kind) { $("resetMsg").innerHTML = t ? `<div class="msg ${kind}">${esc(t)}</div>` : ""; }
+function resetUI(step2) {
+  $("resetStep1").classList.toggle("hidden", step2); $("resetStep2").classList.toggle("hidden", !step2);
+  $("resetConfirm").value = ""; $("resetGo").disabled = true;
+}
+$("resetBtn").onclick = () => {
+  const n = demoMode ? punches.length : submissionIds.length;
+  if (!n) { resetMsg("There are no punches to delete.", "ok"); return; }
+  $("resetCount").textContent = n; resetMsg(""); resetUI(true); $("resetConfirm").focus();
+};
+$("resetCancel").onclick = () => resetUI(false);
+$("resetConfirm").oninput = () => { $("resetGo").disabled = $("resetConfirm").value.trim().toUpperCase() !== "DELETE"; };
+$("resetGo").onclick = async () => {
+  $("resetGo").disabled = true; $("resetCancel").disabled = true;
+  if (demoMode) { punches = []; fillEmpFilter(); render(); resetUI(false); $("resetCancel").disabled = false; resetMsg("All sample punches deleted (sample only).", "ok"); return; }
+  const ids = [...submissionIds]; let done = 0, failed = 0, lastErr = "";
+  for (const id of ids) {
+    try { await api(`/submission/${encodeURIComponent(id)}`, { method: "DELETE" }); done++; submissionIds = submissionIds.filter(x => x !== id); }
+    catch (e) { failed++; lastErr = e.message; }
+    resetMsg(`Deleting… ${done + failed} of ${ids.length}`, "ok");
+  }
+  $("resetCancel").disabled = false; resetUI(false);
+  if (failed) resetMsg(`Deleted ${done} of ${ids.length} punches. ${failed} couldn't be deleted (${lastErr}). Check that your API key has Full Access, then try again.`, "err");
+  else resetMsg(`Deleted all ${done} punches. You're starting fresh.`, "ok");
+  await connect();               // reload what's left
+  showTab("report");
+};
+
 function showMsg(t, kind) { $("connectMsg").innerHTML = `<div class="msg ${kind}">${esc(t)}</div>`; }
 function showReport() { $("connect").classList.add("hidden"); $("report").classList.remove("hidden"); fillEmpFilter(); render(); }
 
@@ -439,14 +579,18 @@ function demo() {
   shift("Sample Employee A", 0, 8, 58, 17, 4); shift("Sample Employee A", 1, 9, 2, 16, 31); shift("Sample Employee A", 2, 8, 45, 17, 15);
   shift("Sample Employee B", 0, 12, 0, 20, 10); shift("Sample Employee B", 1, 11, 55, null); shift("Sample Employee B", 2, 12, 5, 19, 50);
   p.push({ name: "Sample Employee C", type: "out", time: mk(1, 15, 0) }); shift("Sample Employee C", 3, 7, 30, 15, 45);
-  punches = p; demoMode = true; nameQ = null; source = "Sample data only. Connect your API key to see real punches.";
+  punches = p; demoMode = true; nameQ = null; rosterQ = null; schedQ = null; loadQuestions(); source = "Sample data only. Connect your API key to see real punches.";
   showReport();
 }
 
-/* ---------- employees (the "Your Name" drop-down on the form) ---------- */
+/* ---------- employees ----------
+   Roster  = hidden "Employee Roster (admin only)" drop-down: everyone registered.
+   Working = visible "Your Name" drop-down: only these people can clock in.        */
 let demoMode = false;
-let nameQ = null;            // {qid, options: []}
+let nameQ = null;            // visible list   {qid, options: []}
+let rosterQ = null;          // hidden roster  {qid, options: []}
 let pendingRemove = null;    // name awaiting in-page confirmation
+let busy = false;
 
 function creds() { return { key: $("apikey").value.trim(), formId: $("formid").value.trim(), base: $("region").value }; }
 
@@ -458,16 +602,48 @@ async function api(path, opts = {}) {
   if (!res.ok || !body || body.responseCode !== 200) throw new Error(body && body.message ? body.message : `HTTP ${res.status}`);
   return body.content;
 }
+const splitOpts = o => String(o || "").split("|").map(s => s.trim()).filter(Boolean);
+
+function onClockNames() {
+  return new Set(buildShifts(punches).filter(s => s.issue === "open").map(s => s.name.toLowerCase()));
+}
+
+let schedQ = null;           // hidden schedule list {qid, options: []}
+
+async function loadQuestions() {
+  if (demoMode) {
+    if (!nameQ) {
+      rosterQ = { qid: "demoR", options: ["Sample Employee A", "Sample Employee B", "Sample Employee C", "Sample Employee D"] };
+      nameQ = { qid: "demo", options: ["Sample Employee A", "Sample Employee B"] };
+      const m = mondayOf(new Date()), d = n => ymd(addDays(m, n));
+      schedQ = { qid: "demoS", options: [
+        `Sample Employee A ~ ${d(0)} ~ 09:00 ~ 17:00`, `Sample Employee A ~ ${d(1)} ~ 09:00 ~ 16:30`, `Sample Employee A ~ ${d(2)} ~ 09:00 ~ 17:00`,
+        `Sample Employee B ~ ${d(0)} ~ 12:00 ~ 20:00`, `Sample Employee B ~ ${d(2)} ~ 12:00 ~ 20:00`,
+        `Sample Employee C ~ ${d(3)} ~ 08:00 ~ 15:30`] };
+      schedules = schedQ.options.map(parseSched).filter(Boolean);
+    }
+    return;
+  }
+  const qs = Object.values(await api(`/form/${encodeURIComponent(creds().formId)}/questions`));
+  const r = qs.find(x => x.type === "control_dropdown" && /roster/i.test(x.text || ""));
+  const sc = qs.find(x => x.type === "control_dropdown" && /schedule/i.test(x.text || ""));
+  const q = qs.find(x => x.type === "control_dropdown" && x !== r && x !== sc && /name/i.test(x.text || ""));
+  nameQ = q ? { qid: q.qid, options: splitOpts(q.options) } : null;
+  rosterQ = r ? { qid: r.qid, options: splitOpts(r.options) } : null;
+  schedQ = sc ? { qid: sc.qid, options: splitOpts(sc.options) } : null;
+  schedules = schedQ ? schedQ.options.map(parseSched).filter(Boolean) : [];
+  if (nameQ && rosterQ) {           // anyone in the clock-in list must also be on the roster
+    const missing = nameQ.options.filter(n => !has(rosterQ.options, n));
+    if (missing.length) await saveQ(rosterQ, [...rosterQ.options, ...missing]);
+  }
+}
 
 async function loadEmployees() {
-  if (demoMode) { nameQ = nameQ || { qid: "demo", options: ["Sample Employee A", "Sample Employee B", "Sample Employee C"] }; renderEmployees(); return; }
   $("empList").innerHTML = '<p class="muted">Loading names from your form…</p>';
   try {
-    const qs = Object.values(await api(`/form/${encodeURIComponent(creds().formId)}/questions`));
-    const q = qs.find(x => x.type === "control_dropdown" && /name/i.test(x.text || ""))
-           || qs.find(x => x.type === "control_dropdown");
-    if (!q) { nameQ = null; $("empList").innerHTML = '<p class="muted">The form has no name drop-down yet. Ask Claude to turn "Your Name" into a drop-down list.</p>'; return; }
-    nameQ = { qid: q.qid, options: String(q.options || "").split("|").map(s => s.trim()).filter(Boolean) };
+    if (!nameQ) await loadQuestions();
+    if (!nameQ) { $("empList").innerHTML = '<p class="muted">The form has no name drop-down yet. Ask Claude to turn "Your Name" into a drop-down list.</p>'; return; }
+    if (!rosterQ) { $("empList").innerHTML = '<p class="muted">The form is missing its hidden "Employee Roster (admin only)" list. Ask Claude to add it.</p>'; return; }
     renderEmployees();
   } catch (e) {
     $("empList").innerHTML = `<div class="msg err">Couldn't load employee names: ${esc(e.message)}. Make sure your API key has Full Access.</div>`;
@@ -475,29 +651,40 @@ async function loadEmployees() {
 }
 
 function renderEmployees() {
-  const list = [...nameQ.options].sort((a, b) => a.localeCompare(b));
-  $("empCount").textContent = `(${list.length})`;
+  renderSchedule();
+  const list = [...rosterQ.options].sort((a, b) => a.localeCompare(b));
+  const onClock = onClockNames();
+  const working = list.filter(n => has(nameQ.options, n)).length;
+  $("empCount").textContent = `(${list.length} registered · ${working} can clock in now)`;
   if (!list.length) { $("empList").innerHTML = '<p class="muted">No employees yet. Add your first one above.</p>'; return; }
   $("empList").innerHTML = list.map(n => {
+    const on = has(nameQ.options, n), clocked = onClock.has(n.toLowerCase());
     const asking = pendingRemove === n;
-    return `<div class="emp"><span>${esc(n)}</span><span class="actions">${asking
-      ? `<span class="muted" style="font-size:14px">Remove from the clock-in list?</span>
+    const sw = `<label class="switch" title="${on ? "Can clock in" : "Cannot clock in"}">
+        <input type="checkbox" data-work="${esc(n)}" ${on ? "checked" : ""} ${clocked && on ? "disabled" : ""} ${busy ? "disabled" : ""}>
+        <span>${on ? "Working" : "Off"}</span></label>`;
+    return `<div class="emp"><span>${esc(n)}${clocked ? '<span class="pill on">on the clock</span>' : ""}</span><span class="actions">${asking
+      ? `<span class="muted" style="font-size:14px">Remove ${esc(n)} completely?</span>
          <button class="small danger" data-confirm="${esc(n)}">Yes, remove</button>
          <button class="small ghost" data-cancel="1">Keep</button>`
-      : `<button class="small ghost" data-remove="${esc(n)}">Remove</button>`}</span></div>`;
+      : `${sw}<button class="small ghost" data-remove="${esc(n)}" ${clocked ? "disabled" : ""}>Remove</button>`}</span></div>`;
   }).join("");
 }
 
-async function saveOptions(next, okText) {
-  if (demoMode) { nameQ.options = next; pendingRemove = null; renderEmployees(); empMsg(okText + " (sample only)", "ok"); return; }
+async function saveQ(q, next) {
+  if (demoMode) { q.options = next; return; }
   const body = new URLSearchParams();
   body.set("question[options]", next.join("|"));
-  try {
-    await api(`/form/${encodeURIComponent(creds().formId)}/question/${encodeURIComponent(nameQ.qid)}`, { method: "POST", body });
-    nameQ.options = next; pendingRemove = null; renderEmployees(); empMsg(okText, "ok");
-  } catch (e) {
-    empMsg(`Couldn't save: ${e.message}. Your API key needs Full Access to change names.`, "err");
-  }
+  await api(`/form/${encodeURIComponent(creds().formId)}/question/${encodeURIComponent(q.qid)}`, { method: "POST", body });
+  q.options = next;
+}
+
+async function change(fn, okText) {
+  if (busy) return;
+  busy = true; renderEmployees();
+  try { await fn(); pendingRemove = null; empMsg(okText + (demoMode ? " (sample only)" : ""), "ok"); }
+  catch (e) { empMsg(`Couldn't save: ${e.message}. Your API key needs Full Access to change names.`, "err"); }
+  finally { busy = false; renderEmployees(); }
 }
 function empMsg(t, kind) { $("empMsg").innerHTML = `<div class="msg ${kind}">${esc(t)}</div>`; }
 
@@ -506,9 +693,19 @@ $("addEmpForm").addEventListener("submit", e => {
   if (!nameQ) { empMsg("Employee names haven't loaded yet.", "err"); return; }
   const name = $("empName").value.replace(/\s+/g, " ").trim().replace(/\|/g, "");
   if (!name) { empMsg("Type the employee's full name first.", "err"); return; }
-  if (nameQ.options.some(o => o.toLowerCase() === name.toLowerCase())) { empMsg(`${name} is already registered.`, "err"); return; }
+  if (has(rosterQ.options, name)) { empMsg(`${name} is already registered.`, "err"); return; }
+  const work = $("empWorkNow").checked;
   $("empName").value = "";
-  saveOptions([...nameQ.options, name], `Added ${name}. They can now pick their name on the clock-in form.`);
+  change(async () => {
+    await saveQ(rosterQ, [...rosterQ.options, name]);
+    if (work) await saveQ(nameQ, [...nameQ.options, name]);
+  }, work ? `Added ${name}. They can clock in now.` : `Added ${name}. Switch them to Working when you need them.`);
+});
+$("empList").addEventListener("change", e => {
+  const box = e.target.closest("input[data-work]"); if (!box) return;
+  const n = box.dataset.work;
+  if (box.checked) change(() => saveQ(nameQ, [...nameQ.options, n]), `${n} can clock in now.`);
+  else change(() => saveQ(nameQ, nameQ.options.filter(o => !same(o, n))), `${n} is switched off and can't clock in.`);
 });
 $("empList").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
@@ -516,8 +713,58 @@ $("empList").addEventListener("click", e => {
   else if (b.dataset.cancel) { pendingRemove = null; renderEmployees(); }
   else if (b.dataset.confirm) {
     const n = b.dataset.confirm;
-    saveOptions(nameQ.options.filter(o => o !== n), `Removed ${n}. Their past hours stay in the weekly report.`);
+    change(async () => {
+      if (has(nameQ.options, n)) await saveQ(nameQ, nameQ.options.filter(o => !same(o, n)));
+      await saveQ(rosterQ, rosterQ.options.filter(o => !same(o, n)));
+    }, `Removed ${n}. Their past hours stay in the weekly report.`);
   }
+});
+
+function renderSchedule() {
+  const sel = $("schedName"), cur = sel.value;
+  const names = rosterQ ? [...rosterQ.options].sort((a, b) => a.localeCompare(b)) : [];
+  sel.innerHTML = names.length ? names.map(n => `<option>${esc(n)}</option>`).join("") : '<option value="">Register an employee first</option>';
+  if (has(names, cur)) sel.value = cur;
+  if (!$("schedDate").value) $("schedDate").value = ymd(new Date());
+  if (!schedQ) { $("schedList").innerHTML = '<p class="muted">The form is missing its hidden "Shift Schedule (admin only)" list. Ask Claude to add it.</p>'; return; }
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const up = schedules.filter(x => x.to >= today).sort((a, b) => a.from - b.from || a.name.localeCompare(b.name));
+  if (!up.length) { $("schedList").innerHTML = '<p class="muted">No upcoming shifts. Add one above.</p>'; return; }
+  $("schedList").innerHTML = up.map(x => `<div class="emp"><span><b>${esc(x.from.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }))}</b>
+      · ${esc(schedLabel(x))} · ${esc(x.name)}</span>
+      <span class="actions"><button class="small ghost" data-unsched="${esc(schedToOpt(x))}" ${busy ? "disabled" : ""}>Remove</button></span></div>`).join("");
+}
+function schedMsg(t, kind) { $("schedMsg").innerHTML = `<div class="msg ${kind}">${esc(t)}</div>`; }
+
+async function saveSchedules(next, okText) {
+  if (busy) return;
+  busy = true; renderEmployees();
+  // keep 120 days of history for past weekly reports
+  const cutoff = addDays(new Date(), -120);
+  next = next.filter(x => x.to >= cutoff).sort((a, b) => a.from - b.from);
+  try {
+    await saveQ(schedQ, next.length ? next.map(schedToOpt) : ["none"]);
+    schedules = next; schedMsg(okText + (demoMode ? " (sample only)" : ""), "ok");
+  } catch (e) { schedMsg(`Couldn't save the schedule: ${e.message}. Your API key needs Full Access.`, "err"); }
+  finally { busy = false; renderEmployees(); if (punches.length) render(); }
+}
+
+$("schedForm").addEventListener("submit", e => {
+  e.preventDefault();
+  if (!schedQ) { schedMsg("The schedule hasn't loaded yet.", "err"); return; }
+  const name = $("schedName").value, date = $("schedDate").value, start = $("schedStart").value, end = $("schedEnd").value;
+  if (!name) { schedMsg("Register the employee first.", "err"); return; }
+  if (!date || !start || !end) { schedMsg("Pick a date, a start time and an end time.", "err"); return; }
+  if (start === end) { schedMsg("The end time must be different from the start time.", "err"); return; }
+  const x = mkSched(name, date, start, end);
+  const clash = schedules.find(o => same(o.name, name) && o.from < x.to && o.to > x.from);
+  if (clash) { schedMsg(`${name} already has a shift then (${schedLabel(clash)}). Remove it first.`, "err"); return; }
+  saveSchedules([...schedules, x], `Scheduled ${name} on ${x.from.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}, ${schedLabel(x)}.`);
+});
+$("schedList").addEventListener("click", e => {
+  const b = e.target.closest("button[data-unsched]"); if (!b) return;
+  const key = b.dataset.unsched;
+  saveSchedules(schedules.filter(x => schedToOpt(x) !== key), "Shift removed.");
 });
 
 function showTab(which) {
@@ -539,6 +786,8 @@ $("nextWk").onclick = () => { weekStart = addDays(weekStart, 7); render(); };
 $("csvBtn").onclick = downloadCSV;
 $("pdfBtn").onclick = downloadPDF;
 $("empFilter").onchange = render;
+$("payRule").checked = load("thryve_payrule") !== "actual";
+$("payRule").onchange = () => { store("thryve_payrule", $("payRule").checked ? "scheduled" : "actual"); render(); };
 $("refreshBtn").onclick = () => { if (load("thryve_key")) { $("connect").classList.remove("hidden"); $("report").classList.add("hidden"); connect(); } else demo(); };
 $("disconnectBtn").onclick = () => { store("thryve_key", null); punches = []; nameQ = null; showTab("report"); $("apikey").value = ""; $("report").classList.add("hidden"); $("connect").classList.remove("hidden"); $("connectMsg").innerHTML = ""; };
 
