@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thryve Weekly Hours</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+  /* Thryve.Today admin: black ground, mint + gold from the school seal */
+  :root {
+    --bg: #f5f6f2; --panel: #ffffff; --line: #e1e3db; --ink: #141614; --muted: #5c6159;
+    --mint: #5fe3b0; --mint-ink: #0c7a55; --gold: #7a6a1c; --warn: #a15c00; --bad: #c0392b;
+    --ok-bg: #e4f7ee; --ok-ink: #0b4d36; --err-bg: #fbe7e4; --err-ink: #7a1d12;
+    color-scheme: light;
+    --display: "Montserrat", "Segoe UI", Arial, sans-serif;
+    --body: "Source Sans 3", "Segoe UI", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--body); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding-block: 24px 60px; padding-inline: 16px; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  header img { width: 72px; height: 72px; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,.18); }
+  h1 { font: 700 24px/1.2 var(--display); margin: 0; letter-spacing: .5px; }
+  h1 span { color: var(--mint-ink); }
+  .sub { color: var(--gold); font: 600 13px var(--display); letter-spacing: 2px; text-transform: uppercase; }
+  h2 { font: 600 17px var(--display); margin: 0 0 12px; color: var(--gold); letter-spacing: .4px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 2px rgba(20,22,20,.04); }
+  label { display: block; color: var(--muted); font-size: 14px; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #c9ccc3;
+    background: #ffffff; color: var(--ink); font: inherit; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--mint-ink); outline-offset: 2px; }
+  button { font: 600 15px var(--display); border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+    background: var(--mint); color: #062a1e; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  .row > .grow { flex: 1 1 220px; }
+  .weekbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .weekbar .range { font: 700 20px var(--display); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0 0; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat b { display: block; font: 700 24px var(--display); color: var(--mint-ink); font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 14px; }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { color: var(--muted); font: 600 12px var(--display); letter-spacing: .8px; text-transform: uppercase; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  td.total { color: var(--mint-ink); font-weight: 700; }
+  tr.foot td { font-weight: 600; border-bottom: 0; }
+  .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid currentColor; margin-left: 6px; }
+  .pill.on { color: var(--mint-ink); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); }
+  .muted { color: var(--muted); }
+  .msg { padding: 10px 14px; border-radius: 8px; margin-top: 12px; }
+  .msg.err { background: var(--err-bg); color: var(--err-ink); } .msg.ok { background: var(--ok-bg); color: var(--ok-ink); }
+  details summary { cursor: pointer; color: var(--mint-ink); }
+  .hidden { display: none !important; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+  .tab { background: transparent; color: var(--muted); border-radius: 8px 8px 0 0; border-bottom: 3px solid transparent; padding: 10px 16px; }
+  .tab.on { color: var(--ink); border-bottom-color: var(--mint); }
+  .emp { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .emp:last-child { border-bottom: 0; }
+  .emp .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  button.small { padding: 6px 12px; font-size: 13px; }
+  button.danger { background: var(--bad); color: #ffffff; }
+  @media (max-width: 560px) { header img { width: 56px; height: 56px; } h1 { font-size: 20px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="logo.png" alt="Thryve.Today Training Center logo" onerror="this.remove()">
+    <div>
+      <div class="sub">Time Clock Admin</div>
+      <h1>Thryve<span>.</span>Today Training Center</h1>
+    </div>
+  </header>
+
+  <!-- Connect -->
+  <section class="panel" id="connect">
+    <h2>Connect to your Jotform time clock</h2>
+    <p class="muted" style="margin-top:0">Paste your Jotform API key once. It's saved only in this browser on this computer.
+      To get it: in Jotform, click your profile picture → <b>Settings</b> → <b>API</b> → <b>Create New Key</b>, and set it to <b>Full Access</b> so this page can add and remove employee names.</p>
+    <div class="row">
+      <div class="grow"><label for="apikey">Jotform API key</label><input id="apikey" type="password" autocomplete="off" placeholder="Paste key here"></div>
+      <div style="flex:0 1 200px"><label for="formid">Form ID</label><input id="formid" value="262835728338064"></div>
+      <div style="flex:0 1 170px"><label for="region">Account region</label>
+        <select id="region"><option value="https://api.jotform.com">Standard (US)</option>
+          <option value="https://eu-api.jotform.com">EU</option>
+          <option value="https://hipaa-api.jotform.com">HIPAA</option></select></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="connectBtn">Load punches</button>
+      <button id="demoBtn" class="ghost">Preview with sample data</button>
+    </div>
+    <div id="connectMsg"></div>
+  </section>
+
+  <!-- Report -->
+  <section id="report" class="hidden">
+    <nav class="tabs" role="tablist">
+      <button role="tab" id="tabBtnReport" class="tab on" aria-selected="true">Weekly Report</button>
+      <button role="tab" id="tabBtnEmp" class="tab" aria-selected="false">Employees</button>
+    </nav>
+
+    <!-- Employees tab -->
+    <div id="tabEmployees" class="hidden">
+      <div class="panel">
+        <h2>Register an employee</h2>
+        <p class="muted" style="margin-top:0">Names you add here appear in the <b>Your Name</b> list on the clock-in form right away.</p>
+        <form id="addEmpForm" class="row" autocomplete="off">
+          <div class="grow"><label for="empName">Employee full name</label><input id="empName" placeholder="e.g. Jane Smith" maxlength="60"></div>
+          <button type="submit" id="addEmpBtn">Add employee</button>
+        </form>
+        <div id="empMsg"></div>
+      </div>
+      <div class="panel">
+        <h2>Registered employees <span class="muted" id="empCount" style="font-weight:600"></span></h2>
+        <div id="empList"><p class="muted">Loading names from your form…</p></div>
+      </div>
+    </div>
+
+    <div id="tabReport">
+    <div class="panel">
+      <div class="weekbar">
+        <button class="ghost" id="prevWk" aria-label="Previous week">← Previous week</button>
+        <div style="text-align:center">
+          <div class="range" id="weekLabel"></div>
+          <div class="muted" id="sourceLabel" style="font-size:14px"></div>
+        </div>
+        <button class="ghost" id="nextWk" aria-label="Next week">Next week →</button>
+      </div>
+      <div class="stats">
+        <div class="stat"><b id="sTotal">0:00</b><span>Total hours</span></div>
+        <div class="stat"><b id="sPeople">0</b><span>Employees worked</span></div>
+        <div class="stat"><b id="sShifts">0</b><span>Shifts</span></div>
+        <div class="stat"><b id="sIssues">0</b><span>Punches to review</span></div>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <div style="flex:0 1 260px"><label for="empFilter">Show report for</label>
+          <select id="empFilter"><option value="">All employees</option></select></div>
+        <button id="refreshBtn" class="ghost">Refresh</button>
+        <button id="pdfBtn">Download week as PDF</button>
+        <button id="csvBtn" class="ghost">Download week as CSV</button>
+        <button id="disconnectBtn" class="ghost">Forget API key</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Hours by employee</h2>
+      <div class="tablewrap"><table id="summary"></table></div>
+      <p class="muted" style="font-size:14px;margin-bottom:0">Hours shown as hours:minutes. Each shift counts on the day it was clocked in.
+        Times come from Jotform's submission time stamp, which employees can't change.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Shift details</h2>
+      <div class="tablewrap"><table id="detail"></table></div>
+    </div>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+let punches = [];          // {name, type:'in'|'out', time:Date, location}
+let weekStart = mondayOf(new Date());
+let source = "";
+
+/* ---------- storage (this browser only) ---------- */
+function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+/* ---------- date helpers ---------- */
+function mondayOf(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function fmtDay(d) { return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }); }
+function fmtTime(d) { return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }); }
+function fmtDT(d) { return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) + ", " + fmtTime(d); }
+function hm(ms) { const m = Math.round(ms / 60000); return Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0"); }
+function parseJotformDate(s) { // "2026-10-11 14:05:33" in the account's time zone
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/.exec(s || "");
+  return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)) : null;
+}
+
+/* ---------- turn Jotform submissions into punches ---------- */
+function answerText(a) {
+  if (!a) return "";
+  if (typeof a.answer === "string") return a.answer;
+  if (a.answer && typeof a.answer === "object") {
+    if ("first" in a.answer || "last" in a.answer) return [a.answer.first, a.answer.last].filter(Boolean).join(" ");
+    return Object.values(a.answer).join(" ");
+  }
+  return a.prettyFormat || "";
+}
+function toPunch(sub) {
+  if (sub.status && sub.status !== "ACTIVE") return null;
+  const answers = Object.values(sub.answers || {});
+  const nameA = answers.find(a => a.type === "control_fullname") || answers.find(a => /name/i.test(a.text || ""));
+  const clockA = answers.find(a => /clock\s*in|clock\s*out/i.test(answerText(a)));
+  const locA = answers.find(a => /location/i.test(a.text || ""));
+  const name = answerText(nameA).replace(/\s+/g, " ").trim();
+  const choice = answerText(clockA);
+  const time = parseJotformDate(sub.created_at);
+  if (!name || !time || !/clock/i.test(choice)) return null;
+  return { name, type: /out/i.test(choice) ? "out" : "in", time, location: answerText(locA) };
+}
+
+/* ---------- pair clock-ins with clock-outs ---------- */
+function buildShifts(list) {
+  const byPerson = new Map();
+  [...list].sort((a, b) => a.time - b.time).forEach(p => {
+    const key = p.name.toLowerCase();
+    if (!byPerson.has(key)) byPerson.set(key, { name: p.name, punches: [] });
+    byPerson.get(key).punches.push(p);
+  });
+  const shifts = [];
+  for (const person of byPerson.values()) {
+    let open = null;
+    for (const p of person.punches) {
+      if (p.type === "in") {
+        if (open) shifts.push({ name: person.name, in: open.time, out: null, issue: "No clock-out before next clock-in" });
+        open = p;
+      } else if (open) {
+        shifts.push({ name: person.name, in: open.time, out: p.time, issue: (p.time - open.time) > 16 * 3600e3 ? "Over 16 hours" : "" });
+        open = null;
+      } else {
+        shifts.push({ name: person.name, in: null, out: p.time, issue: "Clock-out with no clock-in" });
+      }
+    }
+    if (open) shifts.push({ name: person.name, in: open.time, out: null, issue: "open" });
+  }
+  return shifts;
+}
+function shiftMs(s) { return s.in && s.out ? s.out - s.in : 0; }
+
+/* ---------- render ---------- */
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+function weekShifts() {
+  const end = addDays(weekStart, 7);
+  const who = $("empFilter").value;
+  return buildShifts(punches).filter(s => { const t = s.in || s.out; return t >= weekStart && t < end && (!who || s.name.toLowerCase() === who); });
+}
+
+function fillEmpFilter() {
+  const sel = $("empFilter"), cur = sel.value, names = new Map();
+  punches.forEach(p => { const k = p.name.toLowerCase(); if (!names.has(k)) names.set(k, p.name); });
+  sel.innerHTML = '<option value="">All employees</option>' + [...names].sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join("");
+  sel.value = names.has(cur) ? cur : "";
+}
+function filterName() { const s = $("empFilter"); return s.value ? s.options[s.selectedIndex].text : ""; }
+
+function render() {
+  const end = addDays(weekStart, 6);
+  $("weekLabel").textContent = fmtDay(weekStart) + " – " + fmtDay(end) + ", " + end.getFullYear();
+  $("sourceLabel").textContent = source;
+  $("nextWk").disabled = weekStart >= mondayOf(new Date());
+  const shifts = weekShifts();
+
+  const people = new Map();
+  shifts.forEach(s => {
+    const k = s.name.toLowerCase();
+    if (!people.has(k)) people.set(k, { name: s.name, days: Array(7).fill(0), total: 0, n: 0, open: false, issues: 0 });
+    const r = people.get(k), t = s.in || s.out, di = (t.getDay() + 6) % 7;
+    r.days[di] += shiftMs(s); r.total += shiftMs(s);
+    if (s.in && s.out) r.n++;
+    if (s.issue === "open") r.open = true; else if (s.issue) r.issues++;
+  });
+  const rows = [...people.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const dayTotals = Array(7).fill(0); rows.forEach(r => r.days.forEach((v, i) => dayTotals[i] += v));
+  const grand = rows.reduce((a, r) => a + r.total, 0);
+  const issues = shifts.filter(s => s.issue && s.issue !== "open").length;
+
+  $("sTotal").textContent = hm(grand);
+  $("sPeople").textContent = rows.length;
+  $("sShifts").textContent = shifts.filter(s => s.in && s.out).length;
+  $("sIssues").textContent = issues;
+
+  const head = `<tr><th>Employee</th>${DAYS.map((d, i) => `<th class="n">${d}<br><span class="muted" style="text-transform:none;letter-spacing:0">${fmtDay(addDays(weekStart, i))}</span></th>`).join("")}<th class="n">Total</th></tr>`;
+  $("summary").innerHTML = rows.length ? head + rows.map(r =>
+    `<tr><td>${esc(r.name)}${r.open ? '<span class="pill on">on the clock</span>' : ""}${r.issues ? `<span class="pill warn">${r.issues} to review</span>` : ""}</td>
+     ${r.days.map(v => `<td class="n">${v ? hm(v) : '<span class="muted">—</span>'}</td>`).join("")}<td class="n total">${hm(r.total)}</td></tr>`).join("")
+    + `<tr class="foot"><td>All employees</td>${dayTotals.map(v => `<td class="n">${v ? hm(v) : "—"}</td>`).join("")}<td class="n total">${hm(grand)}</td></tr>`
+    : `<tr><td class="muted">No punches this week.</td></tr>`;
+
+  const sorted = shifts.sort((a, b) => a.name.localeCompare(b.name) || ((a.in || a.out) - (b.in || b.out)));
+  $("detail").innerHTML = sorted.length ? `<tr><th>Employee</th><th>Clock in</th><th>Clock out</th><th class="n">Hours</th><th>Status</th></tr>` + sorted.map(s =>
+    `<tr><td>${esc(s.name)}</td><td>${s.in ? fmtDT(s.in) : '<span class="muted">—</span>'}</td>
+     <td>${s.out ? fmtDT(s.out) : '<span class="muted">—</span>'}</td><td class="n">${shiftMs(s) ? hm(shiftMs(s)) : "—"}</td>
+     <td>${s.issue === "open" ? '<span class="pill on">on the clock</span>' : s.issue ? `<span class="pill ${s.in && s.out ? "warn" : "bad"}">${esc(s.issue)}</span>` : '<span class="muted">OK</span>'}</td></tr>`).join("")
+    : `<tr><td class="muted">No shifts this week.</td></tr>`;
+}
+
+/* ---------- CSV ---------- */
+function downloadCSV() {
+  const q = v => `"${String(v).replace(/"/g, '""')}"`;
+  const lines = [["Employee", "Date", "Clock In", "Clock Out", "Hours (decimal)", "Hours (h:mm)", "Status"].map(q).join(",")];
+  weekShifts().sort((a, b) => a.name.localeCompare(b.name) || ((a.in || a.out) - (b.in || b.out))).forEach(s => {
+    const t = s.in || s.out;
+    lines.push([s.name, t.toLocaleDateString("en-US"), s.in ? fmtTime(s.in) : "", s.out ? fmtTime(s.out) : "",
+      (shiftMs(s) / 3600e3).toFixed(2), shiftMs(s) ? hm(shiftMs(s)) : "", s.issue === "open" ? "On the clock" : (s.issue || "OK")].map(q).join(","));
+  });
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `thryve-hours-${weekStart.toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* ---------- PDF ---------- */
+function weekSummaryRows() {
+  const shifts = weekShifts(), people = new Map();
+  shifts.forEach(s => {
+    const k = s.name.toLowerCase();
+    if (!people.has(k)) people.set(k, { name: s.name, days: Array(7).fill(0), total: 0, open: false, issues: 0 });
+    const r = people.get(k), t = s.in || s.out, di = (t.getDay() + 6) % 7;
+    r.days[di] += shiftMs(s); r.total += shiftMs(s);
+    if (s.issue === "open") r.open = true; else if (s.issue) r.issues++;
+  });
+  return { shifts, rows: [...people.values()].sort((a, b) => a.name.localeCompare(b.name)) };
+}
+
+function downloadPDF() {
+  const lib = window.jspdf;
+  if (!lib || !lib.jsPDF || !lib.jsPDF.API.autoTable) {
+    alert("The PDF tool didn't load. Check your internet connection and reopen this page. Opening the print window instead; choose \"Save as PDF\".");
+    window.print(); return;
+  }
+  const doc = new lib.jsPDF({ orientation: "landscape", unit: "pt", format: "letter" });
+  const W = doc.internal.pageSize.getWidth(), M = 40;
+  const end = addDays(weekStart, 6);
+  const range = `${fmtDay(weekStart)} – ${fmtDay(end)}, ${end.getFullYear()}`;
+  const { shifts, rows } = weekSummaryRows();
+  const grand = rows.reduce((a, r) => a + r.total, 0);
+  const dayTotals = Array(7).fill(0); rows.forEach(r => r.days.forEach((v, i) => dayTotals[i] += v));
+  const mint = [95, 227, 176], ink = [20, 22, 20];
+
+  doc.setFillColor(...mint); doc.rect(0, 0, W, 8, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...ink);
+  doc.text("Thryve.Today Training Center", M, 44);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.setTextColor(80);
+  doc.text(`${filterName() ? "Weekly Hours for " + filterName() : "Weekly Hours Report"}  ·  ${range}`, M, 64);
+  doc.setFontSize(9);
+  doc.text(`Generated ${new Date().toLocaleString("en-US")}  ·  Hours shown as h:mm`, W - M, 64, { align: "right" });
+
+  doc.setFontSize(11); doc.setTextColor(...ink);
+  doc.text(`Total hours: ${hm(grand)}     Employees: ${rows.length}     Shifts: ${shifts.filter(s => s.in && s.out).length}     Punches to review: ${shifts.filter(s => s.issue && s.issue !== "open").length}`, M, 88);
+
+  const days = DAYS.map((d, i) => `${d}\n${fmtDay(addDays(weekStart, i))}`);
+  doc.autoTable({
+    startY: 100, margin: { left: M, right: M },
+    head: [["Employee", ...days, "Total"]],
+    body: rows.length ? rows.map(r => [r.name + (r.open ? "  (on the clock)" : "") + (r.issues ? `  (${r.issues} to review)` : ""),
+      ...r.days.map(v => v ? hm(v) : "—"), hm(r.total)]) : [["No punches this week", "", "", "", "", "", "", "", ""]],
+    foot: rows.length > 1 || (rows.length && !filterName()) ? [["All employees", ...dayTotals.map(v => v ? hm(v) : "—"), hm(grand)]] : undefined,
+    styles: { fontSize: 9.5, cellPadding: 5, lineColor: [210, 212, 205], lineWidth: 0.75, textColor: ink },
+    headStyles: { fillColor: ink, textColor: [255, 255, 255], halign: "center" },
+    footStyles: { fillColor: [228, 247, 238], textColor: ink, fontStyle: "bold" },
+    columnStyles: Object.fromEntries([...Array(8)].map((_, i) => [i + 1, { halign: "right" }])),
+    didParseCell: d => {
+      if (d.section === "head" && d.column.index === 0) d.cell.styles.halign = "left";
+      if (d.section === "foot" && d.column.index > 0) d.cell.styles.halign = "right";
+    }
+  });
+
+  const detail = [...shifts].sort((a, b) => a.name.localeCompare(b.name) || ((a.in || a.out) - (b.in || b.out)));
+  doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+  let y = doc.lastAutoTable.finalY + 28;
+  if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = 50; }
+  doc.text("Shift details", M, y);
+  doc.autoTable({
+    startY: y + 8, margin: { left: M, right: M },
+    head: [["Employee", "Clock in", "Clock out", "Hours", "Status"]],
+    body: detail.length ? detail.map(s => [s.name, s.in ? fmtDT(s.in) : "—", s.out ? fmtDT(s.out) : "—",
+      shiftMs(s) ? hm(shiftMs(s)) : "—", s.issue === "open" ? "On the clock" : (s.issue || "OK")]) : [["No shifts this week", "", "", "", ""]],
+    styles: { fontSize: 9.5, cellPadding: 5, lineColor: [210, 212, 205], lineWidth: 0.75, textColor: ink },
+    headStyles: { fillColor: ink, textColor: [255, 255, 255] },
+    columnStyles: { 3: { halign: "right" } },
+    didParseCell: d => { if (d.section === "body" && d.column.index === 4 && d.cell.raw !== "OK") d.cell.styles.textColor = [161, 92, 0]; }
+  });
+
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i); doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120);
+    doc.text(`Thryve.Today Training Center · Weekly Hours · ${range}`, M, doc.internal.pageSize.getHeight() - 20);
+    doc.text(`Page ${i} of ${pages}`, W - M, doc.internal.pageSize.getHeight() - 20, { align: "right" });
+  }
+  const who = filterName() ? "-" + filterName().replace(/[^A-Za-z0-9]+/g, "-") : "";
+  doc.save(`thryve-hours${who}-${weekStart.toISOString().slice(0, 10)}.pdf`);
+}
+
+/* ---------- Jotform API ---------- */
+async function fetchAll(base, key, formId) {
+  const all = []; let offset = 0;
+  while (true) {
+    const url = `${base}/form/${encodeURIComponent(formId)}/submissions?apiKey=${encodeURIComponent(key)}&limit=1000&offset=${offset}&orderby=created_at`;
+    const res = await fetch(url);
+    let body = null; try { body = await res.json(); } catch (e) {}
+    if (!res.ok || !body || body.responseCode !== 200) {
+      const m = body && body.message ? body.message : `HTTP ${res.status}`;
+      throw new Error(m);
+    }
+    all.push(...body.content);
+    if (body.content.length < 1000) break;
+    offset += 1000;
+  }
+  return all;
+}
+
+async function connect() {
+  const key = $("apikey").value.trim(), formId = $("formid").value.trim(), base = $("region").value;
+  if (!key) { showMsg("Paste your Jotform API key first.", "err"); return; }
+  $("connectBtn").disabled = true; showMsg("Loading punches from Jotform…", "ok");
+  try {
+    const subs = await fetchAll(base, key, formId);
+    punches = subs.map(toPunch).filter(Boolean);
+    demoMode = false; nameQ = null;
+    store("thryve_key", key); store("thryve_form", formId); store("thryve_region", base);
+    source = `Live from Jotform · ${punches.length} punches · updated ${fmtTime(new Date())}`;
+    showReport();
+  } catch (e) {
+    showMsg(`Couldn't load punches: ${e.message}. Check the API key, form ID and account region, then try again.`, "err");
+  } finally { $("connectBtn").disabled = false; }
+}
+function showMsg(t, kind) { $("connectMsg").innerHTML = `<div class="msg ${kind}">${esc(t)}</div>`; }
+function showReport() { $("connect").classList.add("hidden"); $("report").classList.remove("hidden"); fillEmpFilter(); render(); }
+
+/* ---------- sample data (clearly labeled) ---------- */
+function demo() {
+  const mk = (dayOffset, h, m) => { const d = addDays(mondayOf(new Date()), dayOffset); d.setHours(h, m, 0, 0); return d; };
+  const p = [];
+  const shift = (name, day, ih, im, oh, om) => { p.push({ name, type: "in", time: mk(day, ih, im) }); if (oh != null) p.push({ name, type: "out", time: mk(day, oh, om) }); };
+  shift("Sample Employee A", 0, 8, 58, 17, 4); shift("Sample Employee A", 1, 9, 2, 16, 31); shift("Sample Employee A", 2, 8, 45, 17, 15);
+  shift("Sample Employee B", 0, 12, 0, 20, 10); shift("Sample Employee B", 1, 11, 55, null); shift("Sample Employee B", 2, 12, 5, 19, 50);
+  p.push({ name: "Sample Employee C", type: "out", time: mk(1, 15, 0) }); shift("Sample Employee C", 3, 7, 30, 15, 45);
+  punches = p; demoMode = true; nameQ = null; source = "Sample data only. Connect your API key to see real punches.";
+  showReport();
+}
+
+/* ---------- employees (the "Your Name" drop-down on the form) ---------- */
+let demoMode = false;
+let nameQ = null;            // {qid, options: []}
+let pendingRemove = null;    // name awaiting in-page confirmation
+
+function creds() { return { key: $("apikey").value.trim(), formId: $("formid").value.trim(), base: $("region").value }; }
+
+async function api(path, opts = {}) {
+  const { key, base } = creds();
+  const sep = path.includes("?") ? "&" : "?";
+  const res = await fetch(`${base}${path}${sep}apiKey=${encodeURIComponent(key)}`, opts);
+  let body = null; try { body = await res.json(); } catch (e) {}
+  if (!res.ok || !body || body.responseCode !== 200) throw new Error(body && body.message ? body.message : `HTTP ${res.status}`);
+  return body.content;
+}
+
+async function loadEmployees() {
+  if (demoMode) { nameQ = nameQ || { qid: "demo", options: ["Sample Employee A", "Sample Employee B", "Sample Employee C"] }; renderEmployees(); return; }
+  $("empList").innerHTML = '<p class="muted">Loading names from your form…</p>';
+  try {
+    const qs = Object.values(await api(`/form/${encodeURIComponent(creds().formId)}/questions`));
+    const q = qs.find(x => x.type === "control_dropdown" && /name/i.test(x.text || ""))
+           || qs.find(x => x.type === "control_dropdown");
+    if (!q) { nameQ = null; $("empList").innerHTML = '<p class="muted">The form has no name drop-down yet. Ask Claude to turn "Your Name" into a drop-down list.</p>'; return; }
+    nameQ = { qid: q.qid, options: String(q.options || "").split("|").map(s => s.trim()).filter(Boolean) };
+    renderEmployees();
+  } catch (e) {
+    $("empList").innerHTML = `<div class="msg err">Couldn't load employee names: ${esc(e.message)}. Make sure your API key has Full Access.</div>`;
+  }
+}
+
+function renderEmployees() {
+  const list = [...nameQ.options].sort((a, b) => a.localeCompare(b));
+  $("empCount").textContent = `(${list.length})`;
+  if (!list.length) { $("empList").innerHTML = '<p class="muted">No employees yet. Add your first one above.</p>'; return; }
+  $("empList").innerHTML = list.map(n => {
+    const asking = pendingRemove === n;
+    return `<div class="emp"><span>${esc(n)}</span><span class="actions">${asking
+      ? `<span class="muted" style="font-size:14px">Remove from the clock-in list?</span>
+         <button class="small danger" data-confirm="${esc(n)}">Yes, remove</button>
+         <button class="small ghost" data-cancel="1">Keep</button>`
+      : `<button class="small ghost" data-remove="${esc(n)}">Remove</button>`}</span></div>`;
+  }).join("");
+}
+
+async function saveOptions(next, okText) {
+  if (demoMode) { nameQ.options = next; pendingRemove = null; renderEmployees(); empMsg(okText + " (sample only)", "ok"); return; }
+  const body = new URLSearchParams();
+  body.set("question[options]", next.join("|"));
+  try {
+    await api(`/form/${encodeURIComponent(creds().formId)}/question/${encodeURIComponent(nameQ.qid)}`, { method: "POST", body });
+    nameQ.options = next; pendingRemove = null; renderEmployees(); empMsg(okText, "ok");
+  } catch (e) {
+    empMsg(`Couldn't save: ${e.message}. Your API key needs Full Access to change names.`, "err");
+  }
+}
+function empMsg(t, kind) { $("empMsg").innerHTML = `<div class="msg ${kind}">${esc(t)}</div>`; }
+
+$("addEmpForm").addEventListener("submit", e => {
+  e.preventDefault();
+  if (!nameQ) { empMsg("Employee names haven't loaded yet.", "err"); return; }
+  const name = $("empName").value.replace(/\s+/g, " ").trim().replace(/\|/g, "");
+  if (!name) { empMsg("Type the employee's full name first.", "err"); return; }
+  if (nameQ.options.some(o => o.toLowerCase() === name.toLowerCase())) { empMsg(`${name} is already registered.`, "err"); return; }
+  $("empName").value = "";
+  saveOptions([...nameQ.options, name], `Added ${name}. They can now pick their name on the clock-in form.`);
+});
+$("empList").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.remove) { pendingRemove = b.dataset.remove; renderEmployees(); }
+  else if (b.dataset.cancel) { pendingRemove = null; renderEmployees(); }
+  else if (b.dataset.confirm) {
+    const n = b.dataset.confirm;
+    saveOptions(nameQ.options.filter(o => o !== n), `Removed ${n}. Their past hours stay in the weekly report.`);
+  }
+});
+
+function showTab(which) {
+  const emp = which === "emp";
+  $("tabEmployees").classList.toggle("hidden", !emp);
+  $("tabReport").classList.toggle("hidden", emp);
+  $("tabBtnEmp").classList.toggle("on", emp); $("tabBtnEmp").setAttribute("aria-selected", emp);
+  $("tabBtnReport").classList.toggle("on", !emp); $("tabBtnReport").setAttribute("aria-selected", !emp);
+  if (emp && !nameQ) loadEmployees();
+}
+$("tabBtnReport").onclick = () => showTab("report");
+$("tabBtnEmp").onclick = () => showTab("emp");
+
+/* ---------- wire up ---------- */
+$("connectBtn").onclick = connect;
+$("demoBtn").onclick = demo;
+$("prevWk").onclick = () => { weekStart = addDays(weekStart, -7); render(); };
+$("nextWk").onclick = () => { weekStart = addDays(weekStart, 7); render(); };
+$("csvBtn").onclick = downloadCSV;
+$("pdfBtn").onclick = downloadPDF;
+$("empFilter").onchange = render;
+$("refreshBtn").onclick = () => { if (load("thryve_key")) { $("connect").classList.remove("hidden"); $("report").classList.add("hidden"); connect(); } else demo(); };
+$("disconnectBtn").onclick = () => { store("thryve_key", null); punches = []; nameQ = null; showTab("report"); $("apikey").value = ""; $("report").classList.add("hidden"); $("connect").classList.remove("hidden"); $("connectMsg").innerHTML = ""; };
+
+const savedKey = load("thryve_key");
+if (load("thryve_form")) $("formid").value = load("thryve_form");
+if (load("thryve_region")) $("region").value = load("thryve_region");
+if (savedKey) { $("apikey").value = savedKey; connect(); }
+</script>
+</body>
+</html>
