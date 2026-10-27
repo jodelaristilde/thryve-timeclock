@@ -72,6 +72,14 @@
   .switch input:checked::after { left: 21px; }
   .switch input:disabled { opacity: .55; cursor: default; }
   .switch span { min-width: 58px; }
+  tr.editing td { background: #f3fbf7; }
+  .editor { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding: 6px 0; white-space: normal; }
+  .editor > div { flex: 0 1 230px; }
+  .editor .who { flex: 1 1 100%; font-weight: 600; }
+  .rate { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 14px; }
+  .rate input { width: 84px; padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+  .cell-pay { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
+  td.total .cell-pay { color: var(--mint-ink); font-weight: 600; font-size: 13px; }
   .days { border: 0; padding: 0; margin: 0; min-width: 0; }
   .days legend { color: var(--muted); font-size: 14px; margin-bottom: 6px; padding: 0; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -132,7 +140,7 @@
     <div id="tabEmployees" class="hidden">
       <div class="panel">
         <h2>Register an employee</h2>
-        <p class="muted" style="margin-top:0">Only employees switched to <b>Working</b> appear in the <b>Your Name</b> list on the clock-in form, so only they can clock in.
+        <p class="muted" style="margin-top:0">Set each person's hourly rate in the list below to see pay on the weekly report. Only employees switched to <b>Working</b> appear in the <b>Your Name</b> list on the clock-in form, so only they can clock in.
           Switch someone on when you ask them to work, and off when their shift is over.</p>
         <form id="addEmpForm" class="row" autocomplete="off">
           <div class="grow"><label for="empName">Employee full name</label><input id="empName" placeholder="e.g. Jane Smith" maxlength="60"></div>
@@ -178,6 +186,7 @@
       </div>
       <div class="stats">
         <div class="stat"><b id="sTotal">0:00</b><span>Total hours</span></div>
+        <div class="stat"><b id="sPay">—</b><span>Total pay</span></div>
         <div class="stat"><b id="sPeople">0</b><span>Employees worked</span></div>
         <div class="stat"><b id="sShifts">0</b><span>Shifts</span></div>
         <div class="stat"><b id="sIssues">0</b><span>Punches to review</span></div>
@@ -196,13 +205,27 @@
     <div class="panel">
       <h2>Hours by employee</h2>
       <div class="tablewrap"><table id="summary"></table></div>
-      <p class="muted" style="font-size:14px;margin-bottom:0">Hours shown as hours:minutes. Each shift counts on the day it was clocked in.
+      <p class="muted" style="font-size:14px;margin-bottom:0">Pay = paid hours × hourly rate (no overtime). Hours shown as hours:minutes. Each shift counts on the day it was clocked in.
         Times come from Jotform's submission time stamp, which employees can't change.</p>
     </div>
 
     <div class="panel">
       <h2>Shift details</h2>
+      <div id="editMsg"></div>
       <div class="tablewrap"><table id="detail"></table></div>
+      <p class="muted" style="font-size:14px;margin-bottom:0">Click <b>Edit</b> to fix a clock-in or clock-out time, add a missing one, or delete a shift. The original punch time is kept and shown when you point at the <b>edited</b> tag.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Add a missed shift</h2>
+      <p class="muted" style="margin-top:0">For an employee who forgot to clock in or out completely.</p>
+      <form id="missForm" class="row" autocomplete="off">
+        <div class="grow"><label for="missName">Employee</label><select id="missName"></select></div>
+        <div style="flex:0 1 230px"><label for="missIn">Clock in</label><input id="missIn" type="datetime-local" step="60"></div>
+        <div style="flex:0 1 230px"><label for="missOut">Clock out</label><input id="missOut" type="datetime-local" step="60"></div>
+        <button type="submit" id="missBtn">Add shift</button>
+      </form>
+      <div id="missMsg"></div>
     </div>
 
     <div class="panel">
@@ -265,11 +288,15 @@ function toPunch(sub) {
   const nameA = answers.find(a => a.type === "control_fullname") || answers.find(a => /name/i.test(a.text || ""));
   const clockA = answers.find(a => /clock\s*in|clock\s*out/i.test(answerText(a)));
   const locA = answers.find(a => /location/i.test(a.text || ""));
+  const corrA = answers.find(a => /corrected/i.test(a.text || ""));
   const name = answerText(nameA).replace(/\s+/g, " ").trim();
   const choice = answerText(clockA);
-  const time = parseJotformDate(sub.created_at);
+  const original = parseJotformDate(sub.created_at);
+  const corrText = answerText(corrA).trim();
+  const corrected = parseJotformDate(corrText);
+  const time = corrected || original;
   if (!name || !time || !/clock/i.test(choice)) return null;
-  return { name, type: /out/i.test(choice) ? "out" : "in", time, location: answerText(locA) };
+  return { id: sub.id, name, type: /out/i.test(choice) ? "out" : "in", time, original, edited: !!corrected, added: !!corrected && /added/i.test(corrText), location: answerText(locA) };
 }
 
 /* ---------- pair clock-ins with clock-outs ---------- */
@@ -285,16 +312,16 @@ function buildShifts(list) {
     let open = null;
     for (const p of person.punches) {
       if (p.type === "in") {
-        if (open) shifts.push({ name: person.name, in: open.time, out: null, issue: "No clock-out before next clock-in" });
+        if (open) shifts.push({ name: person.name, in: open.time, out: null, inP: open, outP: null, issue: "No clock-out before next clock-in" });
         open = p;
       } else if (open) {
-        shifts.push({ name: person.name, in: open.time, out: p.time, issue: (p.time - open.time) > 16 * 3600e3 ? "Over 16 hours" : "" });
+        shifts.push({ name: person.name, in: open.time, out: p.time, inP: open, outP: p, issue: (p.time - open.time) > 16 * 3600e3 ? "Over 16 hours" : "" });
         open = null;
       } else {
-        shifts.push({ name: person.name, in: null, out: p.time, issue: "Clock-out with no clock-in" });
+        shifts.push({ name: person.name, in: null, out: p.time, inP: null, outP: p, issue: "Clock-out with no clock-in" });
       }
     }
-    if (open) shifts.push({ name: person.name, in: open.time, out: null, issue: "open" });
+    if (open) shifts.push({ name: person.name, in: open.time, out: null, inP: open, outP: null, issue: "open" });
   }
   return shifts;
 }
@@ -347,8 +374,10 @@ function statusText(s) {
   const parts = [];
   if (s.issue === "open") parts.push("On the clock"); else if (s.issue) parts.push(s.issue);
   parts.push(...annotate(s).notes);
+  if (isEdited(s)) parts.push("Edited by admin");
   return parts.join(" · ") || "OK";
 }
+function isEdited(s) { return !!((s.inP && s.inP.edited) || (s.outP && s.outP.edited)); }
 function needsReview(s) { return (s.issue && s.issue !== "open") || annotate(s).notes.length > 0; }
 
 /* ---------- render ---------- */
@@ -379,7 +408,7 @@ function render() {
   const people = new Map();
   shifts.forEach(s => {
     const k = s.name.toLowerCase();
-    if (!people.has(k)) people.set(k, { name: s.name, days: Array(7).fill(0), total: 0, n: 0, open: false, issues: 0 });
+    if (!people.has(k)) people.set(k, { name: s.name, days: Array(7).fill(0), total: 0, n: 0, open: false, issues: 0, rate: rateOf(s.name) });
     const r = people.get(k), t = s.in || s.out, di = (t.getDay() + 6) % 7;
     r.days[di] += paidMs(s); r.total += paidMs(s);
     if (s.in && s.out) r.n++;
@@ -390,43 +419,53 @@ function render() {
   const dayTotals = Array(7).fill(0); rows.forEach(r => r.days.forEach((v, i) => dayTotals[i] += v));
   const grand = rows.reduce((a, r) => a + r.total, 0);
   const issues = shifts.filter(needsReview).length;
+  const anyRate = rows.some(r => r.rate > 0);
+  const dayPay = Array(7).fill(0); rows.forEach(r => r.days.forEach((v, i) => dayPay[i] += payOf(r.name, v)));
+  const grandPay = dayPay.reduce((a, b) => a + b, 0);
+  const payLine = v => anyRate ? `<span class="cell-pay">${money(v)}</span>` : "";
 
   $("sTotal").textContent = hm(grand);
+  $("sPay").textContent = anyRate ? money(grandPay) : "—";
   $("sPeople").textContent = rows.length;
   $("sShifts").textContent = shifts.filter(s => s.in && s.out).length;
   $("sIssues").textContent = issues;
 
   const head = `<tr><th>Employee</th>${DAYS.map((d, i) => `<th class="n">${d}<br><span class="muted" style="text-transform:none;letter-spacing:0">${fmtDay(addDays(weekStart, i))}</span></th>`).join("")}<th class="n">Total</th></tr>`;
   $("summary").innerHTML = rows.length ? head + rows.map(r =>
-    `<tr><td>${esc(r.name)}${r.open ? '<span class="pill on">on the clock</span>' : ""}${r.issues ? `<span class="pill warn">${r.issues} to review</span>` : ""}</td>
-     ${r.days.map(v => `<td class="n">${v ? hm(v) : '<span class="muted">—</span>'}</td>`).join("")}<td class="n total">${hm(r.total)}</td></tr>`).join("")
-    + `<tr class="foot"><td>All employees</td>${dayTotals.map(v => `<td class="n">${v ? hm(v) : "—"}</td>`).join("")}<td class="n total">${hm(grand)}</td></tr>`
+    `<tr><td>${esc(r.name)}${anyRate ? `<span class="cell-pay">${r.rate ? money(r.rate) + "/hr" : "No rate set"}</span>` : ""}${r.open ? '<span class="pill on">on the clock</span>' : ""}${r.issues ? `<span class="pill warn">${r.issues} to review</span>` : ""}</td>
+     ${r.days.map(v => `<td class="n">${v ? hm(v) + (r.rate ? payLine(payOf(r.name, v)) : "") : '<span class="muted">—</span>'}</td>`).join("")}<td class="n total">${hm(r.total)}${r.rate ? payLine(payOf(r.name, r.total)) : ""}</td></tr>`).join("")
+    + `<tr class="foot"><td>All employees</td>${dayTotals.map((v, i) => `<td class="n">${v ? hm(v) + payLine(dayPay[i]) : "—"}</td>`).join("")}<td class="n total">${hm(grand)}${payLine(grandPay)}</td></tr>`
     : `<tr><td class="muted">No punches this week.</td></tr>`;
 
   const sorted = shifts.sort((a, b) => a.name.localeCompare(b.name) || ((a.in || a.out) - (b.in || b.out)));
-  $("detail").innerHTML = sorted.length ? `<tr><th>Employee</th><th>Scheduled</th><th>Clock in</th><th>Clock out</th><th class="n">Punched</th><th class="n">Paid</th><th>Status</th></tr>` + sorted.map(s => {
-    const a = annotate(s);
+  shownShifts = sorted;
+  $("detail").innerHTML = sorted.length ? `<tr><th>Employee</th><th>Scheduled</th><th>Clock in</th><th>Clock out</th><th class="n">Punched</th><th class="n">Paid</th><th>Status</th><th></th></tr>` + sorted.map(s => {
+    const a = annotate(s), key = shiftKey(s);
+    if (editingKey === key) return editorRow(s);
     const pills = [];
     if (s.issue === "open") pills.push('<span class="pill on">on the clock</span>');
     else if (s.issue) pills.push(`<span class="pill ${s.in && s.out ? "warn" : "bad"}">${esc(s.issue)}</span>`);
     a.notes.forEach(n => pills.push(`<span class="pill ${n === "Not scheduled" ? "bad" : "warn"}">${esc(n)}</span>`));
+    if (isEdited(s)) pills.push(`<span class="pill" title="${esc(editTitle(s))}">edited</span>`);
     return `<tr><td>${esc(s.name)}</td><td>${a.sched ? esc(schedLabel(a.sched)) : '<span class="muted">—</span>'}</td>
      <td>${s.in ? fmtDT(s.in) : '<span class="muted">—</span>'}</td>
      <td>${s.out ? fmtDT(s.out) : '<span class="muted">—</span>'}</td><td class="n">${shiftMs(s) ? hm(shiftMs(s)) : "—"}</td>
      <td class="n total">${s.in && s.out ? hm(a.paid) : "—"}</td>
-     <td style="white-space:normal">${pills.join(" ") || '<span class="muted">OK</span>'}</td></tr>`; }).join("")
+     <td style="white-space:normal">${pills.join(" ") || '<span class="muted">OK</span>'}</td>
+     <td><button class="small ghost" data-edit="${esc(key)}" ${editBusy ? "disabled" : ""}>Edit</button></td></tr>`; }).join("")
     : `<tr><td class="muted">No shifts this week.</td></tr>`;
 }
 
 /* ---------- CSV ---------- */
 function downloadCSV() {
   const q = v => `"${String(v).replace(/"/g, '""')}"`;
-  const lines = [["Employee", "Date", "Scheduled", "Clock In", "Clock Out", "Punched (h:mm)", "Paid hours (decimal)", "Paid (h:mm)", "Status"].map(q).join(",")];
+  const lines = [["Employee", "Date", "Scheduled", "Clock In", "Clock Out", "Punched (h:mm)", "Paid hours (decimal)", "Paid (h:mm)", "Hourly rate", "Pay", "Status"].map(q).join(",")];
   weekShifts().sort((a, b) => a.name.localeCompare(b.name) || ((a.in || a.out) - (b.in || b.out))).forEach(s => {
     const t = s.in || s.out;
     const a = annotate(s);
     lines.push([s.name, t.toLocaleDateString("en-US"), a.sched ? schedLabel(a.sched) : "", s.in ? fmtTime(s.in) : "", s.out ? fmtTime(s.out) : "",
-      shiftMs(s) ? hm(shiftMs(s)) : "", (a.paid / 3600e3).toFixed(2), a.paid ? hm(a.paid) : "", statusText(s)].map(q).join(","));
+      shiftMs(s) ? hm(shiftMs(s)) : "", (a.paid / 3600e3).toFixed(2), a.paid ? hm(a.paid) : "",
+      rateOf(s.name) ? rateOf(s.name).toFixed(2) : "", rateOf(s.name) ? payOf(s.name, a.paid).toFixed(2) : "", statusText(s)].map(q).join(","));
   });
   const blob = new Blob([lines.join("\r\n")], { type: "text/csv" });
   const a = document.createElement("a");
@@ -462,6 +501,10 @@ function downloadPDF() {
   const { shifts, rows } = weekSummaryRows();
   const grand = rows.reduce((a, r) => a + r.total, 0);
   const dayTotals = Array(7).fill(0); rows.forEach(r => r.days.forEach((v, i) => dayTotals[i] += v));
+  const anyRate = rows.some(r => rateOf(r.name) > 0);
+  const dayPay = Array(7).fill(0); rows.forEach(r => r.days.forEach((v, i) => dayPay[i] += payOf(r.name, v)));
+  const grandPay = dayPay.reduce((a, b) => a + b, 0);
+  const cell = (ms, pay, show) => ms ? hm(ms) + (show ? "\n" + money(pay) : "") : "—";
   const mint = [95, 227, 176], ink = [20, 22, 20];
 
   doc.setFillColor(...mint); doc.rect(0, 0, W, 8, "F");
@@ -473,15 +516,15 @@ function downloadPDF() {
   doc.text(`Generated ${new Date().toLocaleString("en-US")}  ·  Hours shown as h:mm  ·  ${payScheduledOnly() ? "Paid: scheduled time only" : "Paid: actual punched time"}`, W - M, 64, { align: "right" });
 
   doc.setFontSize(11); doc.setTextColor(...ink);
-  doc.text(`Paid hours: ${hm(grand)}     Employees: ${rows.length}     Shifts: ${shifts.filter(s => s.in && s.out).length}     Punches to review: ${shifts.filter(needsReview).length}`, M, 88);
+  doc.text(`Paid hours: ${hm(grand)}${anyRate ? "     Total pay: " + money(grandPay) : ""}     Employees: ${rows.length}     Shifts: ${shifts.filter(s => s.in && s.out).length}     Punches to review: ${shifts.filter(needsReview).length}`, M, 88);
 
   const days = DAYS.map((d, i) => `${d}\n${fmtDay(addDays(weekStart, i))}`);
   doc.autoTable({
     startY: 100, margin: { left: M, right: M },
     head: [["Employee", ...days, "Total"]],
-    body: rows.length ? rows.map(r => [r.name + (r.open ? "  (on the clock)" : "") + (r.issues ? `  (${r.issues} to review)` : ""),
-      ...r.days.map(v => v ? hm(v) : "—"), hm(r.total)]) : [["No punches this week", "", "", "", "", "", "", "", ""]],
-    foot: rows.length > 1 || (rows.length && !filterName()) ? [["All employees", ...dayTotals.map(v => v ? hm(v) : "—"), hm(grand)]] : undefined,
+    body: rows.length ? rows.map(r => { const rt = rateOf(r.name); return [r.name + (anyRate ? `\n${rt ? money(rt) + "/hr" : "No rate set"}` : "") + (r.open ? "  (on the clock)" : "") + (r.issues ? `  (${r.issues} to review)` : ""),
+      ...r.days.map(v => cell(v, payOf(r.name, v), rt > 0)), cell(r.total, payOf(r.name, r.total), rt > 0) || "0:00"]; }) : [["No punches this week", "", "", "", "", "", "", "", ""]],
+    foot: rows.length > 1 || (rows.length && !filterName()) ? [["All employees", ...dayTotals.map((v, i) => cell(v, dayPay[i], anyRate)), cell(grand, grandPay, anyRate)]] : undefined,
     styles: { fontSize: 9.5, cellPadding: 5, lineColor: [210, 212, 205], lineWidth: 0.75, textColor: ink },
     headStyles: { fillColor: ink, textColor: [255, 255, 255], halign: "center" },
     footStyles: { fillColor: [228, 247, 238], textColor: ink, fontStyle: "bold" },
@@ -489,6 +532,7 @@ function downloadPDF() {
     didParseCell: d => {
       if (d.section === "head" && d.column.index === 0) d.cell.styles.halign = "left";
       if (d.section === "foot" && d.column.index > 0) d.cell.styles.halign = "right";
+      if (d.column.index === 8 && d.section !== "head") d.cell.styles.fontStyle = "bold";
     }
   });
 
@@ -499,14 +543,14 @@ function downloadPDF() {
   doc.text("Shift details", M, y);
   doc.autoTable({
     startY: y + 8, margin: { left: M, right: M },
-    head: [["Employee", "Scheduled", "Clock in", "Clock out", "Punched", "Paid", "Status"]],
+    head: [["Employee", "Scheduled", "Clock in", "Clock out", "Punched", "Paid", "Pay", "Status"]],
     body: detail.length ? detail.map(s => { const a = annotate(s); return [s.name, a.sched ? schedLabel(a.sched) : "—",
       s.in ? fmtDT(s.in) : "—", s.out ? fmtDT(s.out) : "—", shiftMs(s) ? hm(shiftMs(s)) : "—",
-      s.in && s.out ? hm(a.paid) : "—", statusText(s)]; }) : [["No shifts this week", "", "", "", "", "", ""]],
+      s.in && s.out ? hm(a.paid) : "—", s.in && s.out && rateOf(s.name) ? money(payOf(s.name, a.paid)) : "—", statusText(s)]; }) : [["No shifts this week", "", "", "", "", "", "", ""]],
     styles: { fontSize: 9.5, cellPadding: 5, lineColor: [210, 212, 205], lineWidth: 0.75, textColor: ink },
     headStyles: { fillColor: ink, textColor: [255, 255, 255] },
-    columnStyles: { 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { cellWidth: 170 } },
-    didParseCell: d => { if (d.section === "body" && d.column.index === 6 && d.cell.raw !== "OK") d.cell.styles.textColor = [161, 92, 0]; }
+    columnStyles: { 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { halign: "right" }, 7: { cellWidth: 160 } },
+    didParseCell: d => { if (d.section === "body" && d.column.index === 7 && d.cell.raw !== "OK") d.cell.styles.textColor = [161, 92, 0]; }
   });
 
   const pages = doc.getNumberOfPages();
@@ -543,8 +587,9 @@ async function connect() {
   $("connectBtn").disabled = true; showMsg("Loading punches from Jotform…", "ok");
   try {
     const subs = await fetchAll(base, key, formId);
-    submissionIds = subs.filter(x => !x.status || x.status === "ACTIVE").map(x => x.id);
-    punches = subs.map(toPunch).filter(Boolean);
+    readSettings(subs);
+    submissionIds = subs.filter(x => (!x.status || x.status === "ACTIVE") && x.id !== settingsSubId).map(x => x.id);
+    punches = subs.filter(x => x.id !== settingsSubId).map(toPunch).filter(Boolean);
     demoMode = false; nameQ = null; rosterQ = null; schedQ = null; schedules = [];
     try { await loadQuestions(); } catch (e) { /* report still works without schedules */ }
     store("thryve_key", key); store("thryve_form", formId); store("thryve_region", base);
@@ -554,6 +599,153 @@ async function connect() {
     showMsg(`Couldn't load punches: ${e.message}. Check the API key, form ID and account region, then try again.`, "err");
   } finally { $("connectBtn").disabled = false; }
 }
+/* ---------- pay rates: kept in one private submission, never on the public form ---------- */
+const SETTINGS_TAG = "THRYVE_SETTINGS";
+let rates = {};               // lower-case name -> dollars per hour
+let settingsSubId = null, notesQid = null;
+const money = v => "$" + (Math.round(v * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function rateOf(name) { const r = rates[String(name).toLowerCase()]; return typeof r === "number" && r > 0 ? r : 0; }
+function payOf(name, ms) { return rateOf(name) * ms / 3600e3; }
+function readSettings(subs) {
+  rates = {}; settingsSubId = null;
+  for (const sub of subs) {
+    if (sub.status && sub.status !== "ACTIVE") continue;
+    const a = Object.values(sub.answers || {}).find(x => typeof x.answer === "string" && x.answer.startsWith(SETTINGS_TAG));
+    if (!a) continue;
+    try { const j = JSON.parse(a.answer.slice(SETTINGS_TAG.length).trim()); rates = j.rates || {}; settingsSubId = sub.id; } catch (e) {}
+  }
+}
+async function saveRates(next) {
+  if (demoMode) { rates = next; return; }
+  if (!notesQid) throw new Error('the form is missing its "Notes" field');
+  const body = new URLSearchParams();
+  body.set(`submission[${notesQid}]`, `${SETTINGS_TAG} ${JSON.stringify({ rates: next })}`);
+  if (settingsSubId) await api(`/submission/${encodeURIComponent(settingsSubId)}`, { method: "POST", body });
+  else {
+    const r = await api(`/form/${encodeURIComponent(creds().formId)}/submissions`, { method: "POST", body });
+    settingsSubId = r && (r.submissionID || r.submission_id || r.id) || null;
+  }
+  rates = next;
+}
+
+/* ---------- edit punches ---------- */
+let editingKey = null, editBusy = false, shownShifts = [], pendingDelete = false;
+let correctedQid = null, clockQid = null;
+function shiftKey(s) { return `${s.inP ? s.inP.id : "-"}|${s.outP ? s.outP.id : "-"}|${s.name.toLowerCase()}`; }
+function toLocalInput(d) { return d ? `${ymd(d)}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` : ""; }
+function fromLocalInput(v) { const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v || ""); return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]) : null; }
+function toStore(d) { return `${ymd(d)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:00`; }
+function editTitle(s) {
+  const t = [];
+  const one = (p, label) => { if (p && p.edited) t.push(p.added ? `${label} added by admin` : `${label} originally ${fmtDT(p.original)}`); };
+  one(s.inP, "Clock in"); one(s.outP, "Clock out");
+  return t.join(" · ");
+}
+function editMsg(t, kind) { $("editMsg").innerHTML = t ? `<div class="msg ${kind}" style="margin:0 0 12px">${esc(t)}</div>` : ""; }
+
+function editorRow(s) {
+  const del = pendingDelete
+    ? `<span style="font-size:14px">Delete this whole shift?</span> <button type="button" class="small danger" data-delgo="1">Yes, delete</button> <button type="button" class="small ghost" data-delno="1">Keep</button>`
+    : `<button type="button" class="small ghost" data-delask="1">Delete shift</button>`;
+  return `<tr class="editing"><td colspan="8"><div class="editor">
+    <div class="who">Edit ${esc(s.name)}'s shift${isEdited(s) ? ` <span class="muted" style="font-weight:400">(${esc(editTitle(s))})</span>` : ""}</div>
+    <div><label for="edIn">Clock in</label><input id="edIn" type="datetime-local" step="60" value="${toLocalInput(s.in)}"></div>
+    <div><label for="edOut">Clock out</label><input id="edOut" type="datetime-local" step="60" value="${toLocalInput(s.out)}"></div>
+    <button type="button" class="small" data-save="1" ${editBusy ? "disabled" : ""}>Save</button>
+    <button type="button" class="small ghost" data-cancel="1" ${editBusy ? "disabled" : ""}>Cancel</button>
+    ${del}
+  </div></td></tr>`;
+}
+
+async function setPunchTime(p, d) {
+  if (demoMode) { if (!p.edited) p.original = p.time; p.time = d; p.edited = true; return; }
+  if (!correctedQid) throw new Error('the form is missing its hidden "Corrected Time (admin only)" field');
+  const body = new URLSearchParams(); body.set(`submission[${correctedQid}]`, toStore(d));
+  await api(`/submission/${encodeURIComponent(p.id)}`, { method: "POST", body });
+}
+async function createPunch(name, type, d) {
+  if (demoMode) { punches.push({ id: "demo" + Math.random(), name, type, time: d, original: new Date(), edited: true, added: true }); return; }
+  if (!correctedQid || !clockQid || !nameQ) throw new Error("the form's fields haven't loaded");
+  const body = new URLSearchParams();
+  body.set(`submission[${nameQ.qid}]`, name);
+  body.set(`submission[${clockQid}]`, type === "in" ? "Clock In" : "Clock Out");
+  body.set(`submission[${correctedQid}]`, toStore(d) + " added");
+  await api(`/form/${encodeURIComponent(creds().formId)}/submissions`, { method: "POST", body });
+}
+async function deletePunch(p) {
+  if (demoMode) { punches = punches.filter(x => x !== p); return; }
+  await api(`/submission/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+}
+async function afterEdit(ok) {
+  editingKey = null; pendingDelete = false;
+  if (demoMode) { render(); editMsg(ok + " (sample only)", "ok"); return; }
+  await connect();
+  editMsg(ok, "ok");
+}
+
+$("detail").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b || editBusy) return;
+  if (b.dataset.edit) { editingKey = b.dataset.edit; pendingDelete = false; editMsg(""); render(); return; }
+  const s = shownShifts.find(x => shiftKey(x) === editingKey); if (!s) return;
+  if (b.dataset.cancel) { editingKey = null; pendingDelete = false; render(); return; }
+  if (b.dataset.delask) { pendingDelete = true; render(); return; }
+  if (b.dataset.delno) { pendingDelete = false; render(); return; }
+  if (b.dataset.delgo) {
+    editBusy = true; render();
+    try { if (s.inP) await deletePunch(s.inP); if (s.outP) await deletePunch(s.outP); await afterEdit(`Deleted ${s.name}'s shift.`); }
+    catch (err) { editMsg(`Couldn't delete: ${err.message}. Your API key needs Full Access.`, "err"); }
+    finally { editBusy = false; render(); }
+    return;
+  }
+  if (b.dataset.save) {
+    const inD = fromLocalInput($("edIn").value), outD = fromLocalInput($("edOut").value);
+    if (!inD && !outD) { editMsg("Enter a clock-in or clock-out time, or use Delete shift.", "err"); return; }
+    if (inD && outD && outD <= inD) { editMsg("Clock out must be after clock in.", "err"); return; }
+    if (inD && outD && outD - inD > 24 * 3600e3) { editMsg("That shift is longer than 24 hours. Check the dates.", "err"); return; }
+    if ((inD && inD > new Date()) || (outD && outD > new Date())) { editMsg("Times can't be in the future.", "err"); return; }
+    if (s.inP && !inD) { editMsg("To remove the clock-in, use Delete shift.", "err"); return; }
+    if (s.outP && !outD) { editMsg("To remove the clock-out, use Delete shift.", "err"); return; }
+    editBusy = true; render();
+    try {
+      const changes = [];
+      if (inD && (!s.in || +inD !== +s.in)) { s.inP ? await setPunchTime(s.inP, inD) : await createPunch(s.name, "in", inD); changes.push("clock in " + fmtTime(inD)); }
+      if (outD && (!s.out || +outD !== +s.out)) { s.outP ? await setPunchTime(s.outP, outD) : await createPunch(s.name, "out", outD); changes.push("clock out " + fmtTime(outD)); }
+      if (!changes.length) { editingKey = null; editMsg("Nothing changed.", "ok"); }
+      else await afterEdit(`Saved ${s.name}'s ${changes.join(" and ")}.`);
+    } catch (err) { editMsg(`Couldn't save: ${err.message}. Your API key needs Full Access.`, "err"); }
+    finally { editBusy = false; render(); }
+  }
+});
+
+function fillMissName() {
+  const sel = $("missName"), cur = sel.value, names = new Map();
+  (rosterQ ? rosterQ.options : []).forEach(n => names.set(n.toLowerCase(), n));
+  punches.forEach(p => { if (!names.has(p.name.toLowerCase())) names.set(p.name.toLowerCase(), p.name); });
+  const list = [...names.values()].sort((a, b) => a.localeCompare(b));
+  sel.innerHTML = list.length ? list.map(n => `<option>${esc(n)}</option>`).join("") : '<option value="">Register an employee first</option>';
+  if (has(list, cur)) sel.value = cur;
+}
+$("missForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const m = t => $("missMsg").innerHTML = `<div class="msg ${t[1]}">${esc(t[0])}</div>`;
+  const name = $("missName").value, inD = fromLocalInput($("missIn").value), outD = fromLocalInput($("missOut").value);
+  if (!name) return m(["Register the employee first.", "err"]);
+  if (!inD) return m(["Enter the clock-in time.", "err"]);
+  if (outD && outD <= inD) return m(["Clock out must be after clock in.", "err"]);
+  if (outD && outD - inD > 24 * 3600e3) return m(["That shift is longer than 24 hours. Check the dates.", "err"]);
+  if (inD > new Date() || (outD && outD > new Date())) return m(["Times can't be in the future.", "err"]);
+  $("missBtn").disabled = true;
+  try {
+    await createPunch(name, "in", inD);
+    if (outD) await createPunch(name, "out", outD);
+    $("missIn").value = ""; $("missOut").value = "";
+    if (!demoMode) await connect(); else render();
+    weekStart = mondayOf(inD); render(); fillMissName();
+    m([`Added ${name}'s shift: ${fmtDT(inD)}${outD ? " – " + fmtTime(outD) : ""}.${demoMode ? " (sample only)" : ""}`, "ok"]);
+  } catch (err) { m([`Couldn't add the shift: ${err.message}. Your API key needs Full Access.`, "err"]); }
+  finally { $("missBtn").disabled = false; }
+});
+
 /* ---------- start fresh: delete all punches ---------- */
 let submissionIds = [];
 function resetMsg(t, kind) { $("resetMsg").innerHTML = t ? `<div class="msg ${kind}">${esc(t)}</div>` : ""; }
@@ -585,17 +777,18 @@ $("resetGo").onclick = async () => {
 };
 
 function showMsg(t, kind) { $("connectMsg").innerHTML = `<div class="msg ${kind}">${esc(t)}</div>`; }
-function showReport() { $("connect").classList.add("hidden"); $("report").classList.remove("hidden"); fillEmpFilter(); render(); }
+function showReport() { $("connect").classList.add("hidden"); $("report").classList.remove("hidden"); fillEmpFilter(); fillMissName(); render(); }
 
 /* ---------- sample data (clearly labeled) ---------- */
 function demo() {
   const mk = (dayOffset, h, m) => { const d = addDays(mondayOf(new Date()), dayOffset); d.setHours(h, m, 0, 0); return d; };
   const p = [];
-  const shift = (name, day, ih, im, oh, om) => { p.push({ name, type: "in", time: mk(day, ih, im) }); if (oh != null) p.push({ name, type: "out", time: mk(day, oh, om) }); };
+  const shift = (name, day, ih, im, oh, om) => { p.push({ id: "d" + p.length, name, type: "in", time: mk(day, ih, im) }); if (oh != null) p.push({ id: "d" + p.length, name, type: "out", time: mk(day, oh, om) }); };
   shift("Sample Employee A", 0, 8, 58, 17, 4); shift("Sample Employee A", 1, 9, 2, 16, 31); shift("Sample Employee A", 2, 8, 45, 17, 15);
   shift("Sample Employee B", 0, 12, 0, 20, 10); shift("Sample Employee B", 1, 11, 55, null); shift("Sample Employee B", 2, 12, 5, 19, 50);
-  p.push({ name: "Sample Employee C", type: "out", time: mk(1, 15, 0) }); shift("Sample Employee C", 3, 7, 30, 15, 45);
-  punches = p; demoMode = true; nameQ = null; rosterQ = null; schedQ = null; loadQuestions(); source = "Sample data only. Connect your API key to see real punches.";
+  p.push({ id: "dC", name: "Sample Employee C", type: "out", time: mk(1, 15, 0) }); shift("Sample Employee C", 3, 7, 30, 15, 45);
+  punches = p; demoMode = true; nameQ = null; rosterQ = null; schedQ = null; loadQuestions();
+  rates = { "sample employee a": 18, "sample employee b": 16.5, "sample employee c": 20 }; source = "Sample data only. Connect your API key to see real punches.";
   showReport();
 }
 
@@ -644,6 +837,11 @@ async function loadQuestions() {
   const r = qs.find(x => x.type === "control_dropdown" && /roster/i.test(x.text || ""));
   const sc = qs.find(x => x.type === "control_dropdown" && /schedule/i.test(x.text || ""));
   const q = qs.find(x => x.type === "control_dropdown" && x !== r && x !== sc && /name/i.test(x.text || ""));
+  const corr = qs.find(x => /corrected/i.test(x.text || ""));
+  const clk = qs.find(x => x.type === "control_radio" && /clock/i.test(x.text || "")) || qs.find(x => x.type === "control_radio");
+  correctedQid = corr ? corr.qid : null; clockQid = clk ? clk.qid : null;
+  const notes = qs.find(x => x.type === "control_textarea" && /note/i.test(x.text || "")) || qs.find(x => x.type === "control_textarea");
+  notesQid = notes ? notes.qid : null;
   nameQ = q ? { qid: q.qid, options: splitOpts(q.options) } : null;
   rosterQ = r ? { qid: r.qid, options: splitOpts(r.options) } : null;
   schedQ = sc ? { qid: sc.qid, options: splitOpts(sc.options) } : null;
@@ -683,7 +881,9 @@ function renderEmployees() {
       ? `<span class="muted" style="font-size:14px">Remove ${esc(n)} completely?</span>
          <button class="small danger" data-confirm="${esc(n)}">Yes, remove</button>
          <button class="small ghost" data-cancel="1">Keep</button>`
-      : `${sw}<button class="small ghost" data-remove="${esc(n)}" ${clocked ? "disabled" : ""}>Remove</button>`}</span></div>`;
+      : `<label class="rate">$<input type="number" min="0" step="0.25" inputmode="decimal" placeholder="0.00" aria-label="Hourly rate for ${esc(n)}"
+            data-rate="${esc(n)}" value="${rateOf(n) ? rateOf(n).toFixed(2) : ""}" ${busy ? "disabled" : ""}>/hr</label>
+         ${sw}<button class="small ghost" data-remove="${esc(n)}" ${clocked ? "disabled" : ""}>Remove</button>`}</span></div>`;
   }).join("");
 }
 
@@ -718,6 +918,15 @@ $("addEmpForm").addEventListener("submit", e => {
   }, work ? `Added ${name}. They can clock in now.` : `Added ${name}. Switch them to Working when you need them.`);
 });
 $("empList").addEventListener("change", e => {
+  const rateBox = e.target.closest("input[data-rate]");
+  if (rateBox) {
+    const n = rateBox.dataset.rate, v = rateBox.value.trim() === "" ? 0 : Number(rateBox.value);
+    if (!(v >= 0) || v > 1000) { empMsg("Enter an hourly rate between $0 and $1,000.", "err"); rateBox.value = rateOf(n) ? rateOf(n).toFixed(2) : ""; return; }
+    const next = { ...rates }; if (v) next[n.toLowerCase()] = Math.round(v * 100) / 100; else delete next[n.toLowerCase()];
+    change(() => saveRates(next), v ? `${n}'s rate is now ${money(v)} an hour.` : `${n}'s rate is cleared.`)
+      .then(() => { if (punches.length) render(); });
+    return;
+  }
   const box = e.target.closest("input[data-work]"); if (!box) return;
   const n = box.dataset.work;
   if (box.checked) change(() => saveQ(nameQ, [...nameQ.options, n]), `${n} can clock in now.`);
