@@ -164,7 +164,7 @@
           <button type="submit" id="schedBtn">Add shifts</button>
         </form>
         <div id="schedMsg"></div>
-        <h2 style="margin-top:20px">Upcoming shifts</h2>
+        <h2 style="margin-top:20px">Shifts from last week onward</h2>
         <div id="schedList"><p class="muted">Loading schedule…</p></div>
       </div>
 
@@ -952,9 +952,9 @@ function renderSchedule() {
   if (has(names, cur)) sel.value = cur;
   buildWeekPicker();
   if (!schedQ) { $("schedList").innerHTML = '<p class="muted">The form is missing its hidden "Shift Schedule (admin only)" list. Ask Claude to add it.</p>'; return; }
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const up = schedules.filter(x => x.to >= today).sort((a, b) => a.from - b.from || a.name.localeCompare(b.name));
-  if (!up.length) { $("schedList").innerHTML = '<p class="muted">No upcoming shifts. Add one above.</p>'; return; }
+  const since = addDays(mondayOf(new Date()), -7);
+  const up = schedules.filter(x => x.to >= since).sort((a, b) => a.from - b.from || a.name.localeCompare(b.name));
+  if (!up.length) { $("schedList").innerHTML = '<p class="muted">No shifts from last week onward. Add one above.</p>'; return; }
   $("schedList").innerHTML = up.map(x => `<div class="emp"><span><b>${esc(x.from.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }))}</b>
       · ${esc(schedLabel(x))} · ${esc(x.name)}</span>
       <span class="actions"><button class="small ghost" data-unsched="${esc(schedToOpt(x))}" ${busy ? "disabled" : ""}>Remove</button></span></div>`).join("");
@@ -978,8 +978,8 @@ function buildWeekPicker() {
   const sel = $("schedWeek");
   if (!sel.options.length) {
     const m = mondayOf(new Date());
-    sel.innerHTML = [0, 1, 2, 3, 4, 5].map(i => {
-      const w = addDays(m, 7 * i), label = i === 0 ? "This week" : i === 1 ? "Next week" : "Week of";
+    sel.innerHTML = [-2, -1, 0, 1, 2, 3, 4, 5].map(i => {
+      const w = addDays(m, 7 * i), label = i === -1 ? "Last week" : i === 0 ? "This week" : i === 1 ? "Next week" : "Week of";
       return `<option value="${ymd(w)}">${label} · ${fmtDay(w)} – ${fmtDay(addDays(w, 6))}</option>`;
     }).join("");
     sel.value = ymd(addDays(m, 7));            // default: next week
@@ -988,12 +988,11 @@ function buildWeekPicker() {
 }
 function buildDayChips() {
   const [y, mo, d] = $("schedWeek").value.split("-").map(Number), w = new Date(y, mo - 1, d);
-  const today = new Date(); today.setHours(0, 0, 0, 0);
   const keep = new Set([...document.querySelectorAll("#dayChips input:checked")].map(i => i.dataset.dow));
   $("dayChips").innerHTML = DAYS.map((name, i) => {
-    const day = addDays(w, i), past = day < today;
-    const on = !past && (keep.size ? keep.has(String(i)) : i < 5);
-    return `<label class="chip${past ? " past" : ""}"><input type="checkbox" data-dow="${i}" value="${ymd(day)}" ${on ? "checked" : ""} ${past ? "disabled" : ""}>
+    const day = addDays(w, i);
+    const on = keep.size ? keep.has(String(i)) : i < 5;
+    return `<label class="chip"><input type="checkbox" data-dow="${i}" value="${ymd(day)}" ${on ? "checked" : ""}>
       <b>${name}</b><small>${fmtDay(day)}</small></label>`;
   }).join("");
 }
