@@ -151,7 +151,7 @@
       </div>
       <div class="panel">
         <h2>Schedule the week</h2>
-        <p class="muted" style="margin-top:0">Employees are paid only for time inside their scheduled shift. Clocking in early, late, or on a day with no shift is flagged on the weekly report.</p>
+        <p class="muted" style="margin-top:0">Optional. By default employees can work any day and time and are paid for all the time they're clocked in. Shifts only affect pay when <b>Use shift schedule</b> is ticked on the Weekly Report.</p>
         <form id="schedForm" class="row" autocomplete="off">
           <div class="grow"><label for="schedName">Employee</label><select id="schedName"></select></div>
           <div style="flex:1 1 260px"><label for="schedWeek">Week</label><select id="schedWeek"></select></div>
@@ -194,7 +194,7 @@
       <div class="row" style="margin-top:16px">
         <div style="flex:0 1 260px"><label for="empFilter">Show report for</label>
           <select id="empFilter"><option value="">All employees</option></select></div>
-        <label class="check" for="payRule" style="margin:0 0 10px"><input type="checkbox" id="payRule" checked> Pay scheduled time only</label>
+        <label class="check" for="payRule" style="margin:0 0 10px"><input type="checkbox" id="payRule"> Use shift schedule (pay scheduled time only)</label>
         <button id="refreshBtn" class="ghost">Refresh</button>
         <button id="pdfBtn">Download week as PDF</button>
         <button id="csvBtn" class="ghost">Download week as CSV</button>
@@ -356,13 +356,7 @@ function annotate(s) {
   const sched = mine.find(x => s.in && x.from < (s.out || new Date()) && x.to > s.in)
              || mine.find(x => x.date === ymd(t0)) || null;
   const notes = [];
-  if (!sched) notes.push("Not scheduled");
-  else {
-    if (s.in && s.in < sched.from - GRACE) notes.push(`In early (${hm(sched.from - s.in)})`);
-    if (s.in && s.in > +sched.from + GRACE) notes.push(`Late (${hm(s.in - sched.from)})`);
-    if (s.out && s.out < sched.to - GRACE) notes.push(`Left early (${hm(sched.to - s.out)})`);
-    if (s.out && s.out > +sched.to + GRACE) notes.push(`Stayed late (${hm(s.out - sched.to)})`);
-  }
+  if (!sched && payScheduledOnly()) notes.push("Not scheduled");
   let paid = shiftMs(s);
   if (payScheduledOnly() && s.in && s.out) {
     paid = sched ? Math.max(0, Math.min(s.out, sched.to) - Math.max(s.in, sched.from)) : 0;
@@ -1045,8 +1039,8 @@ $("nextWk").onclick = () => { weekStart = addDays(weekStart, 7); render(); };
 $("csvBtn").onclick = downloadCSV;
 $("pdfBtn").onclick = downloadPDF;
 $("empFilter").onchange = render;
-$("payRule").checked = load("thryve_payrule") !== "actual";
-$("payRule").onchange = () => { store("thryve_payrule", $("payRule").checked ? "scheduled" : "actual"); render(); };
+$("payRule").checked = load("thryve_payrule2") === "scheduled";
+$("payRule").onchange = () => { store("thryve_payrule2", $("payRule").checked ? "scheduled" : "anytime"); render(); };
 $("refreshBtn").onclick = () => { if (load("thryve_key")) { $("connect").classList.remove("hidden"); $("report").classList.add("hidden"); connect(); } else demo(); };
 $("disconnectBtn").onclick = () => { store("thryve_key", null); punches = []; nameQ = null; showTab("report"); $("apikey").value = ""; $("report").classList.add("hidden"); $("connect").classList.remove("hidden"); $("connectMsg").innerHTML = ""; };
 
