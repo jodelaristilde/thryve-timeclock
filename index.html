@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="page-build" content="2026-11-19-0050">
 <title>Thryve Weekly Hours</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Source+Sans+3:wght@400;600&display=swap">
@@ -76,6 +78,10 @@
   .editor { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding: 6px 0; white-space: normal; }
   .editor > div { flex: 0 1 230px; }
   .editor .who { flex: 1 1 100%; font-weight: 600; }
+  .update-bar { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 50;
+    background: var(--ink); color: #fff; padding: 10px 14px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.2);
+    display: flex; gap: 12px; align-items: center; font-size: 15px; max-width: calc(100% - 32px); }
+  .update-bar button { background: var(--mint); color: #062a1e; padding: 6px 12px; font-size: 14px; }
   .who-tag { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }
   .who-tag .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .rate { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 14px; }
@@ -253,6 +259,36 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
+
+/* ---------- auto-update: reload when a newer version is published ---------- */
+(function autoUpdate() {
+  const mine = (document.querySelector('meta[name="page-build"]') || {}).content;
+  if (!mine || location.protocol === "file:") return;
+  let pending = false;
+  async function check() {
+    if (pending || document.hidden) return;
+    try {
+      const res = await fetch(location.pathname + "?build-check=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) return;
+      const m = /<meta name="page-build" content="([^"]+)"/.exec(await res.text());
+      if (!m || m[1] === mine) return;
+      pending = true;
+      const busyEditing = () => { const a = document.activeElement; return a && /INPUT|SELECT|TEXTAREA/.test(a.tagName) && a.value; };
+      const bar = document.createElement("div");
+      bar.className = "update-bar";
+      bar.innerHTML = 'A new version of this page is ready. <button type="button">Update now</button>';
+      bar.querySelector("button").onclick = () => location.reload();
+      document.body.appendChild(bar);
+      // Reload on its own unless someone is in the middle of typing.
+      const tryReload = () => busyEditing() ? setTimeout(tryReload, 15000) : location.reload();
+      setTimeout(tryReload, 3000);
+    } catch (e) { /* offline: try again later */ }
+  }
+  setInterval(check, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  window.addEventListener("focus", check);
+  setTimeout(check, 5000);
+})();
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 let punches = [];          // {name, type:'in'|'out', time:Date, location}
 let weekStart = mondayOf(new Date());
