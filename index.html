@@ -213,7 +213,7 @@
       <h2>Shift details</h2>
       <div id="editMsg"></div>
       <div class="tablewrap"><table id="detail"></table></div>
-      <p class="muted" style="font-size:14px;margin-bottom:0">Click <b>Edit</b> to fix a clock-in or clock-out time, add a missing one, or delete a shift. The original punch time is kept and shown when you point at the <b>edited</b> tag.</p>
+      <p class="muted" style="font-size:14px;margin-bottom:0">Click <b>Edit</b> to fix a clock-in or clock-out time, add a missing one, or delete a shift.</p>
     </div>
 
     <div class="panel">
@@ -368,7 +368,6 @@ function statusText(s) {
   const parts = [];
   if (s.issue === "open") parts.push("On the clock"); else if (s.issue) parts.push(s.issue);
   parts.push(...annotate(s).notes);
-  if (isEdited(s)) parts.push("Edited by admin");
   return parts.join(" · ") || "OK";
 }
 function isEdited(s) { return !!((s.inP && s.inP.edited) || (s.outP && s.outP.edited)); }
@@ -440,7 +439,6 @@ function render() {
     if (s.issue === "open") pills.push('<span class="pill on">on the clock</span>');
     else if (s.issue) pills.push(`<span class="pill ${s.in && s.out ? "warn" : "bad"}">${esc(s.issue)}</span>`);
     a.notes.forEach(n => pills.push(`<span class="pill ${n === "Not scheduled" ? "bad" : "warn"}">${esc(n)}</span>`));
-    if (isEdited(s)) pills.push(`<span class="pill" title="${esc(editTitle(s))}">edited</span>`);
     return `<tr><td>${esc(s.name)}</td><td>${a.sched ? esc(schedLabel(a.sched)) : '<span class="muted">—</span>'}</td>
      <td>${s.in ? fmtDT(s.in) : '<span class="muted">—</span>'}</td>
      <td>${s.out ? fmtDT(s.out) : '<span class="muted">—</span>'}</td><td class="n">${shiftMs(s) ? hm(shiftMs(s)) : "—"}</td>
@@ -642,7 +640,7 @@ function editorRow(s) {
     ? `<span style="font-size:14px">Delete this whole shift?</span> <button type="button" class="small danger" data-delgo="1">Yes, delete</button> <button type="button" class="small ghost" data-delno="1">Keep</button>`
     : `<button type="button" class="small ghost" data-delask="1">Delete shift</button>`;
   return `<tr class="editing"><td colspan="8"><div class="editor">
-    <div class="who">Edit ${esc(s.name)}'s shift${isEdited(s) ? ` <span class="muted" style="font-weight:400">(${esc(editTitle(s))})</span>` : ""}</div>
+    <div class="who">Edit ${esc(s.name)}'s shift</div>
     <div><label for="edIn">Clock in</label><input id="edIn" type="datetime-local" step="60" value="${toLocalInput(s.in)}"></div>
     <div><label for="edOut">Clock out</label><input id="edOut" type="datetime-local" step="60" value="${toLocalInput(s.out)}"></div>
     <button type="button" class="small" data-save="1" ${editBusy ? "disabled" : ""}>Save</button>
