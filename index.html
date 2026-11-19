@@ -76,6 +76,8 @@
   .editor { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding: 6px 0; white-space: normal; }
   .editor > div { flex: 0 1 230px; }
   .editor .who { flex: 1 1 100%; font-weight: 600; }
+  .who-tag { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; }
+  .who-tag .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .rate { display: inline-flex; align-items: center; gap: 4px; margin: 0; color: var(--muted); font-size: 14px; }
   .rate input { width: 84px; padding: 6px 8px; text-align: right; font-variant-numeric: tabular-nums; }
   .cell-pay { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
@@ -373,6 +375,19 @@ function statusText(s) {
 function isEdited(s) { return !!((s.inP && s.inP.edited) || (s.outP && s.outP.edited)); }
 function needsReview(s) { return (s.issue && s.issue !== "open") || annotate(s).notes.length > 0; }
 
+/* ---------- a steady color per employee ---------- */
+// Dark enough to read on white (all at least 4.5:1 contrast).
+const NAME_COLORS = ["#0f6e56", "#1d4ed8", "#b42318", "#7c3aed", "#a15c00", "#0e7490", "#be185d", "#4d7c0f", "#9a3412", "#4338ca", "#854d0e", "#86198f"];
+function nameColor(name) {
+  let h = 0; for (const c of String(name).toLowerCase().trim()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return NAME_COLORS[h % NAME_COLORS.length];
+}
+function nameTag(name) {
+  const c = nameColor(name);
+  return `<span class="who-tag" style="color:${c}"><span class="dot" style="background:${c}"></span>${esc(name)}</span>`;
+}
+function hexRgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+
 /* ---------- render ---------- */
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
@@ -425,7 +440,7 @@ function render() {
 
   const head = `<tr><th>Employee</th>${DAYS.map((d, i) => `<th class="n">${d}<br><span class="muted" style="text-transform:none;letter-spacing:0">${fmtDay(addDays(weekStart, i))}</span></th>`).join("")}<th class="n">Total</th></tr>`;
   $("summary").innerHTML = rows.length ? head + rows.map(r =>
-    `<tr><td>${esc(r.name)}${anyRate ? `<span class="cell-pay">${r.rate ? money(r.rate) + "/hr" : "No rate set"}</span>` : ""}${r.open ? '<span class="pill on">on the clock</span>' : ""}${r.issues ? `<span class="pill warn">${r.issues} to review</span>` : ""}</td>
+    `<tr><td>${nameTag(r.name)}${anyRate ? `<span class="cell-pay">${r.rate ? money(r.rate) + "/hr" : "No rate set"}</span>` : ""}${r.open ? '<span class="pill on">on the clock</span>' : ""}${r.issues ? `<span class="pill warn">${r.issues} to review</span>` : ""}</td>
      ${r.days.map(v => `<td class="n">${v ? hm(v) + (r.rate ? payLine(payOf(r.name, v)) : "") : '<span class="muted">—</span>'}</td>`).join("")}<td class="n total">${hm(r.total)}${r.rate ? payLine(payOf(r.name, r.total)) : ""}</td></tr>`).join("")
     + `<tr class="foot"><td>All employees</td>${dayTotals.map((v, i) => `<td class="n">${v ? hm(v) + payLine(dayPay[i]) : "—"}</td>`).join("")}<td class="n total">${hm(grand)}${payLine(grandPay)}</td></tr>`
     : `<tr><td class="muted">No punches this week.</td></tr>`;
@@ -439,7 +454,7 @@ function render() {
     if (s.issue === "open") pills.push('<span class="pill on">on the clock</span>');
     else if (s.issue) pills.push(`<span class="pill ${s.in && s.out ? "warn" : "bad"}">${esc(s.issue)}</span>`);
     a.notes.forEach(n => pills.push(`<span class="pill ${n === "Not scheduled" ? "bad" : "warn"}">${esc(n)}</span>`));
-    return `<tr><td>${esc(s.name)}</td><td>${a.sched ? esc(schedLabel(a.sched)) : '<span class="muted">—</span>'}</td>
+    return `<tr><td>${nameTag(s.name)}</td><td>${a.sched ? esc(schedLabel(a.sched)) : '<span class="muted">—</span>'}</td>
      <td>${s.in ? fmtDT(s.in) : '<span class="muted">—</span>'}</td>
      <td>${s.out ? fmtDT(s.out) : '<span class="muted">—</span>'}</td><td class="n">${shiftMs(s) ? hm(shiftMs(s)) : "—"}</td>
      <td class="n total">${s.in && s.out ? hm(a.paid) : "—"}</td>
@@ -525,6 +540,7 @@ function downloadPDF() {
       if (d.section === "head" && d.column.index === 0) d.cell.styles.halign = "left";
       if (d.section === "foot" && d.column.index > 0) d.cell.styles.halign = "right";
       if (d.column.index === 8 && d.section !== "head") d.cell.styles.fontStyle = "bold";
+      if (d.section === "body" && d.column.index === 0 && rows[d.row.index]) { d.cell.styles.textColor = hexRgb(nameColor(rows[d.row.index].name)); d.cell.styles.fontStyle = "bold"; }
     }
   });
 
@@ -542,7 +558,10 @@ function downloadPDF() {
     styles: { fontSize: 9.5, cellPadding: 5, lineColor: [210, 212, 205], lineWidth: 0.75, textColor: ink },
     headStyles: { fillColor: ink, textColor: [255, 255, 255] },
     columnStyles: { 4: { halign: "right" }, 5: { halign: "right", fontStyle: "bold" }, 6: { halign: "right" }, 7: { cellWidth: 160 } },
-    didParseCell: d => { if (d.section === "body" && d.column.index === 7 && d.cell.raw !== "OK") d.cell.styles.textColor = [161, 92, 0]; }
+    didParseCell: d => {
+      if (d.section === "body" && d.column.index === 7 && d.cell.raw !== "OK") d.cell.styles.textColor = [161, 92, 0];
+      if (d.section === "body" && d.column.index === 0 && detail[d.row.index]) { d.cell.styles.textColor = hexRgb(nameColor(detail[d.row.index].name)); d.cell.styles.fontStyle = "bold"; }
+    }
   });
 
   const pages = doc.getNumberOfPages();
@@ -640,7 +659,7 @@ function editorRow(s) {
     ? `<span style="font-size:14px">Delete this whole shift?</span> <button type="button" class="small danger" data-delgo="1">Yes, delete</button> <button type="button" class="small ghost" data-delno="1">Keep</button>`
     : `<button type="button" class="small ghost" data-delask="1">Delete shift</button>`;
   return `<tr class="editing"><td colspan="8"><div class="editor">
-    <div class="who">Edit ${esc(s.name)}'s shift</div>
+    <div class="who">Edit ${nameTag(s.name)}'s shift</div>
     <div><label for="edIn">Clock in</label><input id="edIn" type="datetime-local" step="60" value="${toLocalInput(s.in)}"></div>
     <div><label for="edOut">Clock out</label><input id="edOut" type="datetime-local" step="60" value="${toLocalInput(s.out)}"></div>
     <button type="button" class="small" data-save="1" ${editBusy ? "disabled" : ""}>Save</button>
@@ -869,7 +888,7 @@ function renderEmployees() {
     const sw = `<label class="switch" title="${on ? "Can clock in" : "Cannot clock in"}">
         <input type="checkbox" data-work="${esc(n)}" ${on ? "checked" : ""} ${clocked && on ? "disabled" : ""} ${busy ? "disabled" : ""}>
         <span>${on ? "Working" : "Off"}</span></label>`;
-    return `<div class="emp"><span>${esc(n)}${clocked ? '<span class="pill on">on the clock</span>' : ""}</span><span class="actions">${asking
+    return `<div class="emp"><span>${nameTag(n)}${clocked ? '<span class="pill on">on the clock</span>' : ""}</span><span class="actions">${asking
       ? `<span class="muted" style="font-size:14px">Remove ${esc(n)} completely?</span>
          <button class="small danger" data-confirm="${esc(n)}">Yes, remove</button>
          <button class="small ghost" data-cancel="1">Keep</button>`
@@ -948,7 +967,7 @@ function renderSchedule() {
   const up = schedules.filter(x => x.to >= since).sort((a, b) => a.from - b.from || a.name.localeCompare(b.name));
   if (!up.length) { $("schedList").innerHTML = '<p class="muted">No shifts from last week onward. Add one above.</p>'; return; }
   $("schedList").innerHTML = up.map(x => `<div class="emp"><span><b>${esc(x.from.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }))}</b>
-      · ${esc(schedLabel(x))} · ${esc(x.name)}</span>
+      · ${esc(schedLabel(x))} · ${nameTag(x.name)}</span>
       <span class="actions"><button class="small ghost" data-unsched="${esc(schedToOpt(x))}" ${busy ? "disabled" : ""}>Remove</button></span></div>`).join("");
 }
 function schedMsg(t, kind) { $("schedMsg").innerHTML = `<div class="msg ${kind}">${esc(t)}</div>`; }
